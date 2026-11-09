@@ -16,6 +16,7 @@ Everything is set with environment variables; there are no config files.
 | `PORT` | `8000` | Port uvicorn listens on inside the container. |
 | `DATA_DIR` | `/data` in Docker, `data` otherwise | Directory for the SQLite database and image files. In Docker, leave it alone and mount your storage at `/data` instead. |
 | `SESSION_SECRET` | *(random, generated on first start)* | HMAC key for session cookies. When unset, a random key is created on first start, stored in the database and combined with `APP_PASSWORD`, so changing the password still logs every session out. Only set it if you want sessions to survive a password change. |
+| `FORWARDED_ALLOW_IPS` | *(not set)* | Your reverse proxy's IP address or network, so the logs show each visitor's real address instead of the proxy's; see [Behind a reverse proxy](#behind-a-reverse-proxy). Comma-separated, e.g. `172.17.0.1` or `172.18.0.0/16`. Requests from these addresses may name the visitor in `X-Forwarded-For` (and the scheme in `X-Forwarded-Proto`), so list only your proxy. When unset, those headers are ignored. |
 | `TZ` | `UTC` | Timezone used for the 05:00 cleanup schedule and log timestamps (the admin panel always shows UTC). |
 
 ## Storage
@@ -67,6 +68,23 @@ docker run --rm --user 0 -v /srv/img-to-url:/data img-to-url:latest chown 61001:
   app.
 - The app doesn't rate-limit `/login`, so throttle it at the proxy. See
   [Security](security.md).
+- **Visitor addresses in the logs.** Until you set `FORWARDED_ALLOW_IPS`,
+  the log shows the same address for every request: your proxy's. Set the
+  variable to exactly that address, and the log shows each visitor's own
+  address, taken from the `X-Forwarded-For` header the proxy adds. Typically:
+  - proxy on the host, forwarding to `127.0.0.1:8000`: `172.17.0.1`, the
+    gateway of Docker's default network;
+  - proxy in a container on the same Docker network: that network's subnet,
+    such as `172.18.0.0/16` (see `docker network inspect <network>`), since
+    the proxy container's own address can change.
+
+  The proxy has to send the headers: nginx needs
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and
+  `proxy_set_header X-Forwarded-Proto $scheme;`, while Caddy sends them by
+  default. Trust only the proxy, never `*`, unless the app's port can't be
+  reached any other way; otherwise anyone could write any address into your
+  logs. With the proxy on the same host, publishing the port on localhost
+  only (`-p 127.0.0.1:8000:8000`) also keeps anyone from going around it.
 
 ## Troubleshooting
 

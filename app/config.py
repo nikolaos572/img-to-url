@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 from dataclasses import dataclass
@@ -65,6 +66,9 @@ class Settings:
     site_name: str = DEFAULT_SITE_NAME
     #: IMG_CACHE_MINUTES: how long browsers may cache a served image (0 = never).
     image_cache_minutes: int = 0
+    #: FORWARDED_ALLOW_IPS, normalized; uvicorn reads the variable itself.
+    #: "" when unset: forwarded headers are ignored.
+    forwarded_allow_ips: str = ""
 
     @property
     def brand_mark(self) -> str:
@@ -132,6 +136,7 @@ class Settings:
         session_secret = env.get("SESSION_SECRET", "").strip()
 
         site_name = env.get("SITE_NAME", "").strip() or DEFAULT_SITE_NAME
+        forwarded_allow_ips = _env_trusted_proxies(env)
 
         return cls(
             password=password,
@@ -144,6 +149,7 @@ class Settings:
             session_secret=session_secret,
             site_name=site_name,
             image_cache_minutes=image_cache_minutes,
+            forwarded_allow_ips=forwarded_allow_ips,
         )
 
 
@@ -166,6 +172,32 @@ def _env_int(
         top = f" and at most {maximum}" if maximum is not None else ""
         raise ConfigError(f"{name} must be at least {minimum}{top} (got {value}).")
     return value
+
+
+def _env_trusted_proxies(env: dict[str, str]) -> str:
+    """Check FORWARDED_ALLOW_IPS: the reverse proxies whose X-Forwarded-For
+    and X-Forwarded-Proto headers uvicorn believes (it reads the variable
+    itself). Checked here because uvicorn silently ignores an entry it can't
+    parse, such as 172.17.0.1/16, and the logs would quietly keep showing
+    the proxy's address instead of the visitor's.
+    """
+    raw = env.get("FORWARDED_ALLOW_IPS", "").strip()
+    if raw in ("", "*"):
+        return raw
+    entries = [entry.strip() for entry in raw.split(",")]
+    for entry in entries:
+        try:
+            if "/" in entry:
+                ipaddress.ip_network(entry)
+            else:
+                ipaddress.ip_address(entry)
+        except ValueError as exc:
+            raise ConfigError(
+                "FORWARDED_ALLOW_IPS must be IP addresses or networks separated "
+                "by commas, such as 172.17.0.1 or 172.18.0.0/16, or * on its "
+                f"own; {entry!r} is not one ({exc})."
+            ) from None
+    return ",".join(entries)
 
 
 def _env_float(

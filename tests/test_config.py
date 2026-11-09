@@ -144,6 +144,37 @@ def test_port_and_workers_validation():
         Settings.from_env({"APP_PASSWORD": "pw", "WORKERS": "x"})
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("", ""),
+        ("172.17.0.1", "172.17.0.1"),
+        (" 172.18.0.0/16 , 10.0.0.5 ", "172.18.0.0/16,10.0.0.5"),
+        ("::1,fd00::/8", "::1,fd00::/8"),
+        ("*", "*"),
+    ],
+)
+def test_forwarded_allow_ips(raw, expected):
+    settings = Settings.from_env({"APP_PASSWORD": "pw", "FORWARDED_ALLOW_IPS": raw})
+    assert settings.forwarded_allow_ips == expected
+
+
+@pytest.mark.parametrize(
+    "raw,problem",
+    [
+        ("172.17.0.1/16", "'172.17.0.1/16' is not one (172.17.0.1/16 has host bits set)"),
+        ("proxy.example.com", "'proxy.example.com' is not one"),
+        ("10.0.0.1,", "'' is not one"),
+        ("*,10.0.0.1", "'*' is not one"),
+        ("300.1.1.1", "'300.1.1.1' is not one"),
+    ],
+)
+def test_invalid_forwarded_allow_ips_raises(raw, problem):
+    with pytest.raises(ConfigError, match="FORWARDED_ALLOW_IPS must be IP addresses") as error:
+        Settings.from_env({"APP_PASSWORD": "pw", "FORWARDED_ALLOW_IPS": raw})
+    assert problem in str(error.value)
+
+
 def test_custom_session_secret():
     settings = Settings.from_env(
         {"APP_PASSWORD": "pw", "SESSION_SECRET": "my-secret"}

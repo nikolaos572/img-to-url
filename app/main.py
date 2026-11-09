@@ -414,12 +414,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     log.info(
         "img-to-url ready (base_url=%s, max_size=%sMB, expiration=%sh, "
-        "image_cache=%r, workers_env=%s)",
+        "image_cache=%r, workers_env=%s, trusted_proxies=%s)",
         settings.base_url,
         settings.max_size_mb,
         settings.expiration_hours,
         settings.image_cache_control,
         settings.workers,
+        settings.forwarded_allow_ips or "none",
     )
     return app
 

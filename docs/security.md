@@ -71,6 +71,11 @@ page covers what you need to set up yourself and what the app already does.
 
 ## Things to know
 
+- The logs show the address each request came from. Behind a reverse proxy
+  that is the proxy's address, unless `FORWARDED_ALLOW_IPS` names the proxy:
+  then the visitor's address from `X-Forwarded-For` is logged. List only
+  your proxy there, since any address you trust can put whatever it likes in
+  the logs. See [Configuration](configuration.md#behind-a-reverse-proxy).
 - Direct image links are public by design (that's the point of the tool).
   Only uploading and the admin panel require a login.
 - By default, served images aren't cached at all (`Cache-Control: no-store`),

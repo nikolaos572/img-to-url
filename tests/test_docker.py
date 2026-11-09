@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -91,6 +92,22 @@ def _login(url: str) -> requests.Session:
     )
     assert response.status_code == 303, response.text
     return http
+
+
+def _logged_client(container: str, url: str, forwarded_for: str) -> str:
+    """Send a request claiming to be forwarded for an address; return the
+    client address the container's access log shows for it."""
+    marker = secrets.token_hex(8)
+    requests.get(f"{url}/healthz?probe={marker}", headers={"X-Forwarded-For": forwarded_for})
+    pattern = re.compile(rf'(\S+):\d+ - "GET /healthz\?probe={marker} ')
+    deadline = time.time() + 10
+    while True:
+        logs = _run_docker("logs", container)
+        match = pattern.search(logs.stdout + logs.stderr)
+        if match or time.time() > deadline:
+            assert match, logs.stdout + logs.stderr
+            return match.group(1)
+        time.sleep(0.2)
 
 
 def _pixels(data: bytes) -> bytes:
@@ -312,6 +329,36 @@ class TestDockerSmoke:
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             statuses = list(pool.map(one, range(8)))
         assert statuses == [200] * 8
+
+
+class TestVisitorAddressInLogs:
+    """The access log shows the visitor's address from X-Forwarded-For only
+    when FORWARDED_ALLOW_IPS names the proxy, as docs/configuration.md says."""
+
+    def test_forwarded_for_counts_only_from_a_trusted_proxy(self, docker_image, base_url):
+        # The smoke container trusts no proxy, so a client can't put any
+        # address it likes in the log: the real peer is logged instead.
+        peer = _logged_client(CONTAINER_NAME, base_url, forwarded_for="203.0.113.7")
+        assert peer != "203.0.113.7"
+
+        # Trust exactly that peer, the way the docs describe finding it.
+        name = f"{CONTAINER_NAME}-proxy"
+        port = _free_port()
+        url = f"http://127.0.0.1:{port}"
+        _run_docker("rm", "-f", name, check=False)
+        try:
+            _run_docker(
+                "run", "-d", "--name", name,
+                "-p", f"127.0.0.1:{port}:8000",
+                "-e", f"APP_PASSWORD={CONTAINER_PASSWORD}",
+                "-e", f"BASE_URL={url}",
+                "-e", f"FORWARDED_ALLOW_IPS={peer}",
+                docker_image,
+            )
+            _wait_until_healthy(url, name)
+            assert _logged_client(name, url, forwarded_for="203.0.113.7") == "203.0.113.7"
+        finally:
+            _run_docker("rm", "-f", name, check=False)
 
 
 class TestHostDirectory:
