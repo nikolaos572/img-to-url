@@ -143,9 +143,16 @@ function showResult(data, file) {
   resultLink.classList.remove('hidden');
   resultBox.classList.remove('hidden');
   // Auto-select so Ctrl+C copies without touching the mouse.
+  selectUrl();
+}
+
+// Select the whole URL but keep its start (the domain) in view: on its own,
+// selecting scrolls the box to the end of the URL.
+function selectUrl() {
   resultUrl.focus();
   resultUrl.select();
-  resultUrl.setSelectionRange(0, data.url.length);
+  resultUrl.setSelectionRange(0, resultUrl.value.length);
+  resultUrl.scrollLeft = 0;
 }
 
 // A format this browser cannot display simply gets no thumbnail.
@@ -169,8 +176,7 @@ copyBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(url);
     copied = true;
   } catch (err) {
-    resultUrl.focus();
-    resultUrl.select();
+    selectUrl();
     copied = document.execCommand('copy');
   }
   copyBtn.textContent = copied ? 'Copied!' : 'Press ' + MOD_KEY + '+C';

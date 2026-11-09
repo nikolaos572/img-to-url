@@ -7,7 +7,7 @@ Everything is set with environment variables; there are no config files.
 | Variable | Default | Description |
 |---|---|---|
 | `APP_PASSWORD` | *(required)* | Password for the single `user` account. |
-| `BASE_URL` | `http://localhost:8000` | Public base URL used to build image links, e.g. `https://images.mydomain.com`. Trailing slash is stripped. |
+| `BASE_URL` | `http://localhost:8000` | Public base URL used to build image links, e.g. `https://images.example.com`. Trailing slash is stripped. |
 | `SITE_NAME` | `img-to-url` | Name shown in the browser tab title, top bar and footer. |
 | `IMG_MAX_SIZE` | `10` | Maximum upload size in **MB**. |
 | `IMG_EXPIRATION_HOURS` | `0` (disabled) | Images older than this many hours are deleted by the daily 05:00 cleanup job. |
@@ -74,7 +74,7 @@ docker run --rm --user 0 -v /srv/img-to-url:/data img-to-url:latest chown 61001:
 
 After a login the app redirects to `/`, which is a 404 for anyone without a
 valid session. If `BASE_URL` is `https://...`, the session cookie is `Secure`,
-and browsers won't send it over plain HTTP. So `https://images.mydomain.com`
+and browsers won't send it over plain HTTP. So `https://images.example.com`
 works, but `http://server-ip:8000` will never log in. Always reach the app
 through the URL you configured as `BASE_URL`, or set `BASE_URL` to the
 `http://...` address when testing locally.

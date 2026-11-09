@@ -3,8 +3,10 @@
 Paste or upload an image, get a direct URL you can share anywhere — even in
 chats and platforms that don't accept file or image attachments.
 
+![The upload page right after an upload: a preview of the image and its direct link, already selected and ready to copy](docs/images/upload-page.png)
+
 - **Paste with Ctrl+V** (clipboard), **pick a file**, or **drag & drop** — all three feed the same upload pipeline.
-- **Direct links** like `https://images.mydomain.com/image-<16 hex>-<16 hex>.png` — public, no login needed to view, auto-selected so you can just press **Ctrl+C** (plus a *Copy URL* button). Deleted or unknown links show a plain *404 Not Found* page.
+- **Direct links** like `https://images.example.com/image-<16 hex>-<16 hex>.png` — public, no login needed to view, auto-selected so you can just press **Ctrl+C** (plus a *Copy URL* button). Deleted or unknown links show a plain *404 Not Found* page.
 - **Login-gated uploads & admin**: a single `user` account whose password comes from an environment variable; a signed session cookie keeps you logged in for 30 days. Log in at `/login` — visitors who aren't logged in get the plain *404 Not Found* page at the bare hostname instead of a redirect to the login form.
 - **Admin panel**: total image count and disk usage, paginated list (10 per page, newest first) with size, date, *Copy* and *Delete* buttons, plus a *Clear all* button.
 - **Dark mode** that follows each visitor's browser / OS setting automatically.
@@ -22,7 +24,7 @@ docker build -t img-to-url:latest .
 docker run -d --name img-to-url \
   -p 8000:8000 \
   -e APP_PASSWORD='change-me' \
-  -e BASE_URL='https://images.mydomain.com' \
+  -e BASE_URL='https://images.example.com' \
   -e SITE_NAME='img-to-url' \
   -e IMG_MAX_SIZE=10 \
   -e IMG_EXPIRATION_HOURS=72 \

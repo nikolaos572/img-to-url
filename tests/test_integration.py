@@ -18,7 +18,7 @@ class TestUserJourney:
 
         settings = Settings(
             password="hunter2",
-            base_url="https://images.mydomain.com",
+            base_url="https://images.example.com",
             max_size_mb=2,
             expiration_hours=0,
             data_dir=tmp_path,
@@ -53,7 +53,7 @@ class TestUserJourney:
             )
             assert response.status_code == 200
             data = response.json()
-            assert data["url"].startswith("https://images.mydomain.com/image-")
+            assert data["url"].startswith("https://images.example.com/image-")
             assert re.fullmatch(
                 r"image-[0-9a-f]{16}-[0-9a-f]{16}\.png", data["filename"]
             )
