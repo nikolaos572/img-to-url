@@ -4,9 +4,9 @@ import threading
 import time
 from pathlib import Path
 
-from app import db, main
+from app import db, images, main
 
-from .conftest import make_png, upload
+from .conftest import make_png, stored_bytes, upload
 
 LATE_FILENAME = "image-0123456789abcdef-0123456789abcdef.png"
 
@@ -49,7 +49,7 @@ class TestAdminListing:
         response = auth_client.get("/admin")
         assert response.status_code == 200
         assert data["url"] in response.text
-        assert "2.0 KB" in response.text
+        assert f">{images.human_size(data['size'])}<" in response.text  # stored size
         assert "1" in response.text  # image count
         assert data["filename"] in response.text
 
@@ -94,11 +94,13 @@ class TestAdminListing:
         assert "onclick" not in html  # wired up by admin.js, as the CSP requires
 
     def test_total_space_and_count(self, auth_client):
-        upload(auth_client, "a.png", make_png(1024))  # magic + 1024 bytes
-        upload(auth_client, "b.png", make_png(2048))
+        first = upload(auth_client, "a.png", make_png(1024)).json()["filename"]
+        second = upload(auth_client, "b.png", make_png(2048)).json()["filename"]
+        stored = len(stored_bytes(auth_client, first)) + len(stored_bytes(auth_client, second))
         response = auth_client.get("/admin")
         assert response.text.count('class="img-row"') == 2
-        assert "3.0 KB" in response.text
+        # The space the stored files take, not what was uploaded.
+        assert f">{images.human_size(stored)}<" in response.text
 
 
 class TestAdminDelete:

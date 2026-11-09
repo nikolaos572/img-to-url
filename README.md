@@ -6,13 +6,14 @@ chats and platforms that don't accept file or image attachments.
 ![The upload page right after an upload: a preview of the image and its direct link, already selected and ready to copy](docs/images/upload-page.png)
 
 - **Paste with Ctrl+V** (clipboard), **pick a file**, or **drag & drop** — all three feed the same upload pipeline.
+- **Only the picture is shared**: every upload is re-encoded, so links serve no GPS location, camera or phone details, capture time, comments or any other metadata. Photos stay upright and keep their colors, transparency and animation.
 - **Direct links** like `https://images.example.com/image-<16 hex>-<16 hex>.png` — public, no login needed to view, auto-selected so you can just press **Ctrl+C** (plus a *Copy URL* button). Deleted or unknown links show a plain *404 Not Found* page.
 - **Login-gated uploads & admin**: a single `user` account whose password comes from an environment variable; a signed session cookie keeps you logged in for 30 days or until you log out. Log in at `/login` — visitors who aren't logged in get the plain *404 Not Found* page at the bare hostname instead of a redirect to the login form.
 - **Admin panel**: total image count and disk usage, paginated list (10 per page, newest first) with size, date, *Copy* and *Delete* buttons, plus a *Clear all* button.
 - **Dark mode** that follows each visitor's browser / OS setting automatically.
 - **Expiration**: optionally delete images older than `IMG_EXPIRATION_HOURS` (a daily 05:00 cleanup job).
 - **No browser caching of images by default**, so deleted images disappear right away; opt in with `IMG_CACHE_MINUTES`.
-- **Light on small VMs**: one uvicorn worker by default, and parallel uploads don't block it.
+- **Light on small VMs**: one uvicorn worker by default, parallel uploads don't block it, and at most two images are re-encoded at a time.
 
 Built with **Python 3.12, FastAPI, uvicorn and SQLite (WAL)**. No config files — everything arrives as environment variables.
 

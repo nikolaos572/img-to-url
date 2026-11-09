@@ -9,7 +9,7 @@ Everything is set with environment variables; there are no config files.
 | `APP_PASSWORD` | *(required)* | Password for the single `user` account. |
 | `BASE_URL` | `http://localhost:8000` | The address you open the app at, e.g. `https://images.example.com`. Image links are built from it, and logins, uploads and other form submissions a browser sends from any other address are refused. Trailing slash is stripped. |
 | `SITE_NAME` | `img-to-url` | Name shown in the browser tab title, top bar and footer. |
-| `IMG_MAX_SIZE` | `10` | Maximum upload size in **MB**. |
+| `IMG_MAX_SIZE` | `10` | Maximum upload size in **MB**. Each upload is decoded and re-encoded to remove its metadata, which briefly takes memory: about 170 MB for a 12-megapixel photo, about 500 MB for 48 megapixels. At most two images are re-encoded at a time per worker. |
 | `IMG_EXPIRATION_HOURS` | `0` (disabled) | Images older than this many hours are deleted by the daily 05:00 cleanup job. |
 | `IMG_CACHE_MINUTES` | `0` (no caching) | How long browsers may cache a served image, in whole minutes (e.g. `5` or `30`; sent as `Cache-Control: public, max-age=…`). `0` sends `Cache-Control: no-store`: nothing is cached, so a deleted image disappears on the next load. |
 | `WORKERS` | `1` | uvicorn worker processes. One is enough for this app; each extra worker adds about 40 MB of memory and more startup CPU, so avoid raising it on small VMs. |

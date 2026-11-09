@@ -62,7 +62,8 @@ class TestUserJourney:
             public = TestClient(app)
             response = public.get("/" + data["filename"])
             assert response.status_code == 200
-            assert response.content == make_png(100)
+            assert response.content == (settings.images_dir / data["filename"]).read_bytes()
+            assert len(response.content) == data["size"]
             assert response.headers["content-type"] == "image/png"
 
             # The image shows up in the admin panel and can be deleted there.
@@ -111,7 +112,8 @@ class TestConcurrentUploads:
             assert response.status_code == 200, (i, response.text)
             data = response.json()
             filenames.add(data["filename"])
-            assert data["size"] == 50 + i + 8  # PNG magic + payload
+            stored = app.state.settings.images_dir / data["filename"]
+            assert data["size"] == stored.stat().st_size
 
         assert len(filenames) == 10
         settings = app.state.settings

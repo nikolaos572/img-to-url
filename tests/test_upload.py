@@ -8,7 +8,7 @@ from starlette.requests import Request
 
 from app import db
 
-from .conftest import make_jpeg, make_png, upload
+from .conftest import make_image, make_jpeg, make_png, stored_bytes, upload
 
 
 def _upload_ok(auth_client, name, content):
@@ -24,26 +24,34 @@ class TestUploadValidation:
             r"image-[0-9a-f]{16}-[0-9a-f]{16}\.png", data["filename"]
         )
         assert data["url"] == "https://images.example.com/" + data["filename"]
-        assert data["size"] == len(make_png(64))
 
+        # What's stored is the re-encoded image: the 64 bytes appended after
+        # the image data are gone, and the reported size is the stored one.
+        stored = stored_bytes(auth_client, data["filename"])
+        assert data["size"] == len(stored) < len(make_png(64))
         settings = auth_client.app.state.settings
-        assert (settings.images_dir / data["filename"]).is_file()
         row = db.get_image(settings.db_path, data["filename"])
         assert row is not None
-        assert row["size"] == len(make_png(64))
+        assert row["size"] == len(stored)
 
-    def test_valid_jpeg_and_webp_extensions(self, auth_client):
-        for name, content in [
-            ("pic.jpg", make_jpeg(10)),
-            ("pic.jpeg", make_jpeg(10)),
-            ("pic.webp", b"RIFF\x00\x00\x00\x00WEBP"),
-            ("pic.gif", b"GIF89a" + b"\x00" * 8),
-            ("pic.bmp", b"BM\x36\x00\x00\x00"),
-            ("pic.avif", b"\x00\x00\x00\x18ftypavi f"),
-            ("pic.ico", b"\x00\x00\x01\x00\x01\x00\x30\x30"),
-        ]:
-            data = _upload_ok(auth_client, name, content)
-            assert data["filename"].endswith("." + name.rsplit(".", 1)[1])
+    @pytest.mark.parametrize("ext", ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"])
+    def test_every_allowed_format(self, auth_client, ext):
+        data = _upload_ok(auth_client, f"pic.{ext}", make_image(ext))
+        assert data["filename"].endswith("." + ext)
+
+    def test_content_decides_the_stored_format(self, auth_client):
+        # A PNG named .jpg is stored, and served, as the PNG it is.
+        data = _upload_ok(auth_client, "really-a-png.jpg", make_png())
+        assert data["filename"].endswith(".png")
+
+    def test_rejects_damaged_image(self, auth_client):
+        # Starts like a PNG, so it passes the quick check, but can't be decoded.
+        response = upload(auth_client, "broken.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+        assert response.status_code == 400
+        assert response.json()["detail"] == (
+            "The file could not be read as an image. It may be damaged."
+        )
+        assert list(auth_client.app.state.settings.images_dir.iterdir()) == []
 
     def test_uppercase_extension_normalized(self, auth_client):
         data = _upload_ok(auth_client, "PHOTO.PNG", make_png(8))
@@ -93,8 +101,8 @@ class TestSizeLimit:
 
     def test_accepts_file_just_under_limit(self, auth_client):
         ok = make_png(1024 * 1024 - 100)
-        data = _upload_ok(auth_client, "edge.png", ok)
-        assert data["size"] == len(ok)
+        assert len(ok) <= 1024 * 1024
+        _upload_ok(auth_client, "edge.png", ok)
 
     def test_custom_limit(self, tmp_path):
         from app.config import Settings
@@ -193,11 +201,11 @@ class TestUploadStorage:
         assert first["filename"] != second["filename"]
 
     def test_upload_counted_in_db(self, auth_client):
-        _upload_ok(auth_client, "a.png", make_png(3))
-        _upload_ok(auth_client, "b.png", make_png(4))
+        first = _upload_ok(auth_client, "a.png", make_png(3))
+        second = _upload_ok(auth_client, "b.png", make_jpeg(4))
         settings = auth_client.app.state.settings
         assert db.count_images(settings.db_path) == 2
-        assert db.total_size(settings.db_path) == len(make_png(3)) + len(make_png(4))
+        assert db.total_size(settings.db_path) == first["size"] + second["size"]
 
     def test_failed_write_leaves_nothing_behind(self, auth_client, monkeypatch):
         def disk_full(path, data):

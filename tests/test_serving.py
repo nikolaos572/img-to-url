@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-from .conftest import make_jpeg, make_png, upload
+from .conftest import make_jpeg, make_png, stored_bytes, upload
 
 # The exact page shown for deleted / non-existent links (templates/404.html).
 NOT_FOUND_PAGE = (
@@ -17,9 +17,10 @@ NOT_FOUND_PAGE = (
 
 
 def _upload_one(auth_client, name="x.png", content=None):
+    """Upload an image; returns its filename and the bytes stored for it."""
     content = content if content is not None else make_png(32)
-    data = upload(auth_client, name, content).json()
-    return data["filename"], content
+    filename = upload(auth_client, name, content).json()["filename"]
+    return filename, stored_bytes(auth_client, filename)
 
 
 class TestPublicServing:

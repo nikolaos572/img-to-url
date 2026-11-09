@@ -7,6 +7,7 @@ the environment). This keeps tests hermetic and avoids touching ./data.
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import tempfile
@@ -19,9 +20,11 @@ os.environ["DATA_DIR"] = _DATA_TMP
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from PIL import Image  # noqa: E402
 
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.sanitize import EXTENSION_FORMATS  # noqa: E402
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -70,17 +73,37 @@ def auth_client(client) -> TestClient:
 
 # ------------------------------------------------------------------ helpers
 
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-JPEG_MAGIC = b"\xff\xd8\xff\xe0"
+def make_image(ext: str = "png", size: tuple[int, int] = (16, 16)) -> bytes:
+    """A small, real, metadata-free image in the format of an allowed extension.
+
+    Uploads are decoded and re-encoded (app/sanitize.py), so test uploads
+    must be real images.
+    """
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (200, 30, 60)).save(buffer, EXTENSION_FORMATS[ext])
+    return buffer.getvalue()
+
+
+_PNG = make_image("png")
+_JPEG = make_image("jpg")
 
 
 def make_png(padding: int = 0) -> bytes:
-    """Minimal fake-but-magic-valid PNG of arbitrary size."""
-    return PNG_MAGIC + b"\x00" * padding
+    """A real PNG followed by ``padding`` extra bytes, to set an exact upload size.
+
+    Decoders ignore bytes after the image data, and uploads drop them.
+    """
+    return _PNG + b"\x00" * padding
 
 
 def make_jpeg(padding: int = 0) -> bytes:
-    return JPEG_MAGIC + b"\x00" * padding
+    """A real JPEG followed by ``padding`` extra bytes (see make_png)."""
+    return _JPEG + b"\x00" * padding
+
+
+def stored_bytes(client, filename: str) -> bytes:
+    """The file the app stored (and serves) for an uploaded image."""
+    return (client.app.state.settings.images_dir / filename).read_bytes()
 
 
 def upload(client, filename: str, content: bytes):

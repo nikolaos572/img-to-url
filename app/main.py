@@ -19,7 +19,7 @@ from starlette.datastructures import Headers, UploadFile
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app import auth, db, images
+from app import auth, db, images, sanitize
 from app.cleanup import start_cleanup_thread
 from app.config import Settings, url_origin
 
@@ -28,7 +28,6 @@ log = logging.getLogger("img-to-url")
 APP_DIR = Path(__file__).parent
 
 PAGE_SIZE = 10
-UPLOAD_CHUNK = 1024 * 1024  # 1 MiB
 MAX_FILENAME_ATTEMPTS = 5
 MAX_FORM_BODY = 64 * 1024  # login / admin forms are a few hundred bytes
 MULTIPART_SLACK = 64 * 1024  # boundaries + part headers around an uploaded file
@@ -277,21 +276,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     detail=f"Only image files are allowed ({allowed}).",
                 )
 
-            max_bytes = settings.max_size_bytes
-            chunks: list[bytes] = []
-            total = 0
-            while chunk := await file.read(UPLOAD_CHUNK):
-                total += len(chunk)
-                if total > max_bytes:
-                    raise HTTPException(status_code=413, detail=too_large)
-                chunks.append(chunk)
-            data = b"".join(chunks)
+            # The whole file has been received (and spooled to disk) by now.
+            # Reading one byte past the limit tells an oversized one apart,
+            # and the upload is held in memory once, not as chunks plus a copy.
+            data = await file.read(settings.max_size_bytes + 1)
+            if len(data) > settings.max_size_bytes:
+                raise HTTPException(status_code=413, detail=too_large)
 
         if not images.looks_like_image(data):
             raise HTTPException(
                 status_code=400,
                 detail="File content is not a recognized image format.",
             )
+        # Only the picture is stored: GPS position, device details and every
+        # other kind of metadata are dropped by re-encoding (app/sanitize.py).
+        try:
+            data, ext = await sanitize.strip_metadata_async(data, ext)
+        except sanitize.InvalidImage as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
         for _ in range(MAX_FILENAME_ATTEMPTS):
             filename = images.random_filename(ext)
@@ -300,7 +302,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return {
                     "url": images.image_url(settings.base_url, filename),
                     "filename": filename,
-                    "size": total,
+                    "size": len(data),
                 }
             except sqlite3.IntegrityError:
                 # Astronomically unlikely, but regenerate on a collision.
