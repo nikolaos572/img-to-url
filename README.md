@@ -33,9 +33,16 @@ docker run -d --name img-to-url \
   img-to-url:latest
 ```
 
-Then open `http://your-host:8000/login`, log in with `user` / your `APP_PASSWORD`,
-and paste an image. (While logged out, `http://your-host:8000/` itself only
-shows a *404 Not Found* page, so bookmark `/login`.)
+Then open your `BASE_URL` followed by `/login`, here
+`https://images.example.com/login`, log in with `user` / your `APP_PASSWORD`,
+and paste an image. While logged out, the address itself only shows a
+*404 Not Found* page, so bookmark `/login`.
+
+> **Open the app at the address in `BASE_URL`.** Image links are built from
+> it, and with an `https://` address the browser only keeps the login cookie
+> over HTTPS, so logging in at `http://your-host:8000` fails. To try the app
+> before your HTTPS reverse proxy is ready, start it with
+> `-e BASE_URL='http://your-host:8000'` and open `http://your-host:8000/login`.
 
 > Mount the volume at **`/data`**. That's where the app keeps the database and
 > images, so a volume mounted anywhere else stays empty and your data ends up in
@@ -45,8 +52,7 @@ shows a *404 Not Found* page, so bookmark `/login`.)
 > to **UID/GID 61001** first, the user the app runs as:
 > `sudo chown 61001:61001 /your/dir`. See [Configuration](docs/configuration.md#storage).
 
-`APP_PASSWORD` is the only required variable. Set `BASE_URL` to the address
-visitors actually use, because image links are built from it.
+`APP_PASSWORD` is the only required variable.
 
 ## Documentation
 
