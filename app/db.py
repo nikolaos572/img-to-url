@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS app_secrets (
     name  TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS revoked_sessions (
+    session_id TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
 """
 
 
@@ -175,6 +179,31 @@ def release_cleanup_run(db_path: Path, run_date: str) -> None:
     """Give back a claimed run (after a failure) so a later poll retries it."""
     with connect(db_path) as conn:
         conn.execute("DELETE FROM cleanup_runs WHERE run_date = ?", (run_date,))
+
+
+def revoke_session(
+    db_path: Path, session_id: str, expires_at: int, now: float | None = None
+) -> None:
+    """Remember a logged-out session until its token expires anyway.
+
+    Entries already past their expiry are pruned here: those tokens are
+    rejected on their expiry alone, so the table stays small.
+    """
+    current = int(time.time() if now is None else now)
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM revoked_sessions WHERE expires_at <= ?", (current,))
+        conn.execute(
+            "INSERT OR IGNORE INTO revoked_sessions (session_id, expires_at) VALUES (?, ?)",
+            (session_id, expires_at),
+        )
+
+
+def is_session_revoked(db_path: Path, session_id: str) -> bool:
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM revoked_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    return row is not None
 
 
 def get_or_create_secret(db_path: Path, name: str, candidate: str) -> str:

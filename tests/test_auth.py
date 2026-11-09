@@ -1,10 +1,13 @@
 """Tests for login, session cookies, and route protection."""
 
+import base64
+import hashlib
+import hmac
 import re
 
 from fastapi.testclient import TestClient
 
-from app import auth
+from app import auth, db
 from app.auth import SESSION_MAX_AGE
 from app.config import Settings
 from app.main import create_app
@@ -130,12 +133,31 @@ class TestProtectedRoutes:
 class TestSessionTokens:
     def test_token_roundtrip_and_expiry(self):
         token = auth.make_token("secret", now=1000)
-        assert auth.verify_token("secret", token, now=1000 + 1)
-        assert not auth.verify_token("secret", token, now=1000 + SESSION_MAX_AGE)
+        session = auth.read_token("secret", token, now=1000 + 1)
+        assert session is not None
+        assert session.expires_at == 1000 + SESSION_MAX_AGE
+        assert auth.read_token("secret", token, now=1000 + SESSION_MAX_AGE) is None
 
     def test_token_signed_with_other_secret_fails(self):
         token = auth.make_token("secret-a", now=1000)
-        assert not auth.verify_token("secret-b", token, now=1001)
+        assert auth.read_token("secret-b", token, now=1001) is None
+
+    def test_every_login_gets_its_own_session_id(self):
+        first = auth.read_token("secret", auth.make_token("secret", now=1000), now=1001)
+        second = auth.read_token("secret", auth.make_token("secret", now=1000), now=1001)
+        assert first.session_id and second.session_id
+        assert first.session_id != second.session_id
+
+    def test_token_without_session_id_is_rejected(self):
+        # The format used before logout could revoke sessions: a correctly
+        # signed expiry alone. Such cookies can't be revoked, so they're refused.
+        def encode(data):
+            return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+        payload = b"9999999999"
+        signature = hmac.new(b"secret", payload, hashlib.sha256).digest()
+        old_token = f"{encode(payload)}.{encode(signature)}"
+        assert auth.read_token("secret", old_token, now=1000) is None
 
     def test_tampered_cookie_is_rejected(self, client):
         _login(client, client.app.state.settings.password)
@@ -195,8 +217,8 @@ class TestGeneratedSessionSecret:
         before = self._app(tmp_path, password="old").state.settings.session_secret
         after = self._app(tmp_path, password="new").state.settings.session_secret
         token = auth.make_token(before)
-        assert auth.verify_token(before, token)
-        assert not auth.verify_token(after, token)
+        assert auth.read_token(before, token) is not None
+        assert auth.read_token(after, token) is None
 
     def test_login_works_and_survives_restart(self, tmp_path):
         client = TestClient(self._app(tmp_path), base_url="https://testserver")
@@ -226,3 +248,42 @@ class TestLogout:
         assert "Max-Age=0" in response.headers["set-cookie"]
 
         assert auth_client.get("/", follow_redirects=False).status_code == 404
+
+    def test_logout_ends_the_session_on_the_server(self, app, auth_client):
+        # A copy of the cookie taken before logging out must stop working too.
+        copied = auth_client.cookies.get("session")
+        auth_client.post("/logout", follow_redirects=False)
+
+        thief = TestClient(app, base_url="https://testserver")
+        thief.cookies.set("session", copied)
+        assert thief.get("/", follow_redirects=False).status_code == 404
+        assert thief.get("/admin", follow_redirects=False).status_code == 303
+        upload = thief.post("/upload", files={"file": ("a.png", b"x")})
+        assert upload.status_code == 401
+        assert thief.post("/admin/clear-all", follow_redirects=False).headers[
+            "location"
+        ] == "/login"
+
+    def test_logout_keeps_other_sessions(self, app, auth_client):
+        other = TestClient(app, base_url="https://testserver")
+        assert _login(other, app.state.settings.password).status_code == 303
+
+        auth_client.post("/logout", follow_redirects=False)
+        assert other.get("/", follow_redirects=False).status_code == 200
+
+    def test_logout_holds_across_workers_and_restarts(self, settings, auth_client):
+        copied = auth_client.cookies.get("session")
+        auth_client.post("/logout", follow_redirects=False)
+
+        # Another app on the same database: a second worker, or a restart.
+        other_worker = TestClient(create_app(settings), base_url="https://testserver")
+        other_worker.cookies.set("session", copied)
+        assert other_worker.get("/", follow_redirects=False).status_code == 404
+
+    def test_logout_without_a_session_is_harmless(self, client):
+        response = client.post("/logout", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+        settings = client.app.state.settings
+        with db.connect(settings.db_path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM revoked_sessions").fetchone()[0] == 0

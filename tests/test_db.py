@@ -1,4 +1,5 @@
-"""Tests for the SQLite layer: startup with several workers, stored secrets."""
+"""Tests for the SQLite layer: startup with several workers, stored secrets,
+revoked sessions."""
 
 import multiprocessing
 import secrets
@@ -78,6 +79,21 @@ def test_workers_booting_together_agree_on_one_key(tmp_path):
 
         assert not [key for key in keys if key.startswith("error")], keys
         assert len(set(keys)) == 1
+
+
+class TestRevokedSessions:
+    def test_revoked_until_it_expires_then_pruned(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        db.init_db(db_path)
+        db.revoke_session(db_path, "old", expires_at=1000, now=500)
+        assert db.is_session_revoked(db_path, "old")
+        assert not db.is_session_revoked(db_path, "never-revoked")
+
+        # The next logout after "old" expired drops it: its token is
+        # refused on its expiry alone by then.
+        db.revoke_session(db_path, "new", expires_at=5000, now=1000)
+        assert not db.is_session_revoked(db_path, "old")
+        assert db.is_session_revoked(db_path, "new")
 
 
 class TestSecrets:

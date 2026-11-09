@@ -28,11 +28,14 @@ page covers what you need to set up yourself and what the app already does.
   `/upload` also checks the session *before* reading the body, so anonymous
   clients can't make the server buffer or spool data to disk.
 - Session cookies are `HttpOnly`, `SameSite=Lax`, `Secure` when `BASE_URL` is
-  https, and signed with HMAC-SHA256 (stateless, so every worker validates
-  them). The signing key includes a random per-install secret, so a leaked
-  cookie can't be used to guess the password offline. All state-changing
-  endpoints are POST, and with `SameSite=Lax` that blocks cross-site form
-  submissions.
+  https, and signed with HMAC-SHA256, so every worker validates them without
+  a session store. The signing key includes a random per-install secret, so a
+  leaked cookie can't be used to guess the password offline.
+- **Logging out ends the session on the server**, not just in your browser:
+  the cookie stops working, including any copy of it taken earlier. Changing
+  `APP_PASSWORD` ends every session at once.
+- All state-changing endpoints are POST, and with `SameSite=Lax` that blocks
+  cross-site form submissions.
 - The container runs as an unprivileged user, UID/GID 61001, not root. The
   number is above the range Linux gives to real accounts (up to 60000), so it
   won't match a host login. That matters if someone ever breaks out of the

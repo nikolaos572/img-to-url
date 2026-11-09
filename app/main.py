@@ -195,9 +195,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     @app.post("/logout", include_in_schema=False)
-    def logout():
+    def logout(request: Request):
         response = RedirectResponse("/login", status_code=303)
-        auth.clear_session_cookie(response)
+        auth.end_session(request, response, settings)
         return response
 
     # ----------------------------------------------------------------- upload
