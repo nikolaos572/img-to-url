@@ -38,6 +38,13 @@ page covers what you need to set up yourself and what the app already does.
   All JavaScript and CSS load only from the site's own `/static` files, and
   there are no inline scripts or inline event handlers anywhere, so if a
   script injection ever slipped through, the browser would refuse to run it.
+- Served images carry their own policy,
+  `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`,
+  plus `X-Content-Type-Options: nosniff`. Whatever a crafted file might
+  contain, opening its link directly can't run scripts or load anything,
+  and the sandbox gives it a unique origin with no access to the site's
+  cookies or pages. Inline styles are allowed only because Chromium's
+  image viewer needs them. Embedding images on other sites isn't affected.
 - Request bodies are capped before anything parses them: uploads at
   `IMG_MAX_SIZE` plus a little multipart overhead, every other form at 64 KB.
   `/upload` also checks the session *before* reading the body, so anonymous

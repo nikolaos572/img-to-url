@@ -193,7 +193,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Stop browsers from MIME-sniffing served files as something active,
         # and stop other sites from embedding the logged-in pages in a frame.
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        if response.headers.get("content-type", "").startswith("text/html"):
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("image/"):
+            # Uploaded files. Whatever a crafted one contains, a browser
+            # opening its link directly may neither run nor load anything
+            # (sandbox also gives it a unique origin, so it can't reach this
+            # site's cookies or pages). Embedding it elsewhere is unaffected.
+            # Inline styles are allowed only because Chromium's own image
+            # viewer uses them to center the picture; they can't load anything.
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            )
+        elif content_type.startswith("text/html"):
             response.headers.setdefault("X-Frame-Options", "DENY")
             # Scripts and styles only from this site's own files — no inline
             # scripts or event handlers anywhere. data: is for the favicon and
