@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 #: How often init_db() retries while another worker initialises a new database.
 _INIT_ATTEMPTS = 20
@@ -48,6 +48,20 @@ def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+@contextmanager
+def write_transaction(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """A connection that holds the database's write lock for the whole block.
+
+    BEGIN IMMEDIATE takes the lock up front, waiting out busy_timeout while
+    another connection (in any worker process) holds it. So work done inside
+    the block, file changes included, never interleaves with another write
+    transaction. Commits on success, rolls back on error.
+    """
+    with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+
+
 def init_db(db_path: Path) -> None:
     """Create the schema (idempotent: every worker runs this at startup).
 
@@ -68,12 +82,21 @@ def init_db(db_path: Path) -> None:
             time.sleep(0.05 * attempt)
 
 
-def insert_image(db_path: Path, filename: str, size: int, created_at: int) -> None:
-    with connect(db_path) as conn:
+@contextmanager
+def adding_image(db_path: Path, filename: str, size: int, created_at: int) -> Iterator[None]:
+    """Insert an image row that is committed only if the block succeeds.
+
+    Write the image file inside the block: the row and the file then appear
+    together under the write lock, so delete_all_images() can never see one
+    without the other. Raises sqlite3.IntegrityError, before the block runs,
+    if the filename is already taken.
+    """
+    with write_transaction(db_path) as conn:
         conn.execute(
             "INSERT INTO images (filename, size, created_at) VALUES (?, ?, ?)",
             (filename, size, created_at),
         )
+        yield
 
 
 def get_image(db_path: Path, filename: str) -> sqlite3.Row | None:
@@ -113,11 +136,19 @@ def delete_image(db_path: Path, filename: str) -> bool:
     return cur.rowcount > 0
 
 
-def delete_all_images(db_path: Path) -> int:
-    """Delete every metadata row. Returns the number of rows removed."""
-    with connect(db_path) as conn:
-        cur = conn.execute("DELETE FROM images")
-    return cur.rowcount
+def delete_all_images(db_path: Path, delete_file: Callable[[str], bool]) -> int:
+    """Delete every image: ``delete_file(filename)`` for each, then its row.
+
+    Runs as one write transaction, so an upload can't add an image halfway
+    through and lose its row while keeping its file. A file that
+    ``delete_file`` reports as not deleted keeps its row, so it stays listed
+    and can be retried. Returns the number of images deleted.
+    """
+    with write_transaction(db_path) as conn:
+        filenames = [row["filename"] for row in conn.execute("SELECT filename FROM images")]
+        deleted = [(filename,) for filename in filenames if delete_file(filename)]
+        conn.executemany("DELETE FROM images WHERE filename = ?", deleted)
+    return len(deleted)
 
 
 def find_expired(db_path: Path, cutoff: int) -> list[str]:

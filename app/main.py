@@ -306,9 +306,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_clear_all(request: Request):
         if not auth.is_authenticated(request, settings):
             return RedirectResponse("/login", status_code=303)
-        for row in db.list_images(settings.db_path, limit=10**9, offset=0):
-            (settings.images_dir / row["filename"]).unlink(missing_ok=True)
-        db.delete_all_images(settings.db_path)
+        db.delete_all_images(
+            settings.db_path,
+            lambda filename: images.delete_file(settings.images_dir, filename),
+        )
         return RedirectResponse("/admin", status_code=303)
 
     # ----------------------------------------------------------------- misc
@@ -358,24 +359,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _save_image(settings: Settings, filename: str, data: bytes) -> None:
-    """Record then write the image (runs in a worker thread).
+    """Record and write a new image (runs in a worker thread).
 
-    The DB row is inserted first: the unique constraint on filename claims
-    the name, so the astronomically-unlikely case of two workers picking
-    the same random filename fails here, *before* any file is touched —
-    the old order could have overwritten and then deleted the other
-    upload's file. If the write itself fails, the row and any partially
-    written file are removed, so no dead link or orphan file is left behind.
+    The row is inserted first: the unique constraint on filename claims the
+    name, so the astronomically unlikely case of two workers picking the
+    same random filename fails here, before any file is touched. The file
+    is then written while that insert still holds the database's write
+    lock, which Clear all takes too, so Clear all sees a new image with
+    both its row and its file or with neither. If the write fails, the row
+    is rolled back and any partial file removed: a partial file would still
+    be publicly served, yet invisible to the admin panel and to Clear all.
     """
-    db.insert_image(settings.db_path, filename, len(data), int(time.time()))
-    try:
-        (settings.images_dir / filename).write_bytes(data)
-    except Exception:
-        # A partial file (e.g. disk full) would still be publicly served,
-        # yet invisible to the admin panel and to Clear all.
-        (settings.images_dir / filename).unlink(missing_ok=True)
-        db.delete_image(settings.db_path, filename)
-        raise
+    path = settings.images_dir / filename
+    with db.adding_image(settings.db_path, filename, len(data), int(time.time())):
+        try:
+            path.write_bytes(data)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
 
 
 def _remove_image(settings: Settings, filename: str) -> bool:
