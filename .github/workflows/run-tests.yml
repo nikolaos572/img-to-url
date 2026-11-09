@@ -19,7 +19,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -r requirements.txt -e ".[dev]"
 
       - name: Run tests
         run: python -m pytest tests/ -v -m "not docker"
@@ -39,7 +39,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -r requirements.txt -e ".[dev]"
 
       - name: Run Docker smoke tests
         run: python -m pytest tests/test_docker.py -v -m docker

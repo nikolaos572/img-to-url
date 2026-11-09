@@ -9,7 +9,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.txt pins every package, indirect ones included. --no-deps
+# installs exactly that list, and pip check then fails the build if the
+# list is incomplete, instead of pip quietly adding an unpinned package.
+RUN pip install --no-cache-dir --no-deps -r requirements.txt \
+    && pip check
 
 COPY app ./app
 
