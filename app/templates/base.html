@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Follow the browser/OS light or dark setting (style.css has both palettes);
+     declared here too so the first paint is already dark, with no white flash. #}
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f6df5'/%3E%3Cpath d='M10 21l5-7 4 5 3-3 5 5H10z' fill='white'/%3E%3Ccircle cx='21' cy='11' r='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{% block brand_href %}/{% endblock %}">
+        <span class="brand-mark">{{ brand_mark }}</span>
+        <span class="brand-name">{{ site_name }}</span>
+      </a>
+      {# Logged-in navigation; the login page overrides this block to hide it. #}
+      {% block topnav %}
+      <nav class="topnav">
+        <a class="topnav-link {% block nav_upload %}{% endblock %}" href="/">Upload</a>
+        <a class="topnav-link {% block nav_admin %}{% endblock %}" href="/admin">Admin</a>
+        <form method="post" action="/logout" class="inline-form">
+          <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
+        </form>
+      </nav>
+      {% endblock %}
+    </div>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">{{ site_name }} &middot; paste an image, share the link</footer>
+</body>
+</html>

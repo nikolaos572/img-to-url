@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Upload &middot; {{ site_name }}{% endblock %}
+{% block nav_upload %}active{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="card-title">Share an image</h1>
+  {# .mod-key elements are switched to ⌘ on Apple devices by upload.js. #}
+  <p class="muted">
+    Paste an image with <strong><span class="mod-key">Ctrl</span>&nbsp;+&nbsp;V</strong>,
+    drop it on the page, or pick a file below.
+    You will get a direct link anyone can open.
+  </p>
+
+  <div id="dropzone" class="dropzone" tabindex="0">
+    <div class="dropzone-inner">
+      <svg class="dropzone-icon" width="42" height="42" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="3"></rect>
+        <circle cx="9" cy="9" r="2"></circle>
+        <path d="M21 15l-4.5-4.5L7 21"></path>
+      </svg>
+      <p class="dropzone-hint">Press <kbd class="mod-key">Ctrl</kbd>+<kbd>V</kbd> to paste an image, or drop one here</p>
+      <label class="btn btn-primary" for="file-input">
+        Choose image file
+        <input id="file-input" type="file" class="visually-hidden"
+               accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.avif,.ico,image/*">
+      </label>
+    </div>
+  </div>
+
+  <div id="status" class="status hidden" role="status">
+    <span class="spinner" aria-hidden="true"></span>
+    <span id="status-text">Uploading&hellip;</span>
+  </div>
+
+  <div id="error" class="alert alert-error hidden" role="alert"></div>
+
+  <div id="result" class="result hidden">
+    <a id="result-link" class="result-preview" target="_blank" rel="noopener"
+       title="Open the image in a new tab">
+      <img id="result-preview" alt="Preview of the uploaded image">
+    </a>
+    <div class="result-body">
+      <p class="result-heading">Your image is ready &mdash; the URL is selected, press <kbd class="mod-key">Ctrl</kbd>+<kbd>C</kbd> to copy it:</p>
+      <div class="result-row">
+        <input id="result-url" type="text" readonly autocomplete="off" spellcheck="false">
+        <button id="copy-btn" type="button" class="btn btn-accent">Copy URL</button>
+      </div>
+      <p id="result-meta" class="result-meta muted small"></p>
+    </div>
+  </div>
+
+  <p class="upload-note muted small">
+    Allowed types: {{ allowed_extensions|join(', ') }} &middot;
+    maximum size {{ '%g'|format(max_size_mb) }} MB per image{% if expiration_hours > 0 %}
+    &middot; images expire after {{ expiration_hours }} hours{% endif %}.
+  </p>
+</section>
+
+{# Configuration is passed through data-* attributes: the strict CSP
+   forbids inline scripts, so upload.js reads its settings from here. #}
+<script src="/static/upload.js" id="upload-config"
+        data-max-bytes="{{ max_size_bytes }}"
+        data-max-mb="{{ '%g'|format(max_size_mb) }}"
+        data-allowed="{{ allowed_extensions|join(',') }}"></script>
+{% endblock %}

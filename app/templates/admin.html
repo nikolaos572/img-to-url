@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Admin &middot; {{ site_name }}{% endblock %}
+{% block nav_admin %}active{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="admin-head">
+    <div>
+      <h1 class="card-title">Admin</h1>
+      <p class="muted">Manage uploaded images and their links.</p>
+    </div>
+    <form method="post" action="/admin/clear-all" class="inline-form"
+          data-confirm="Delete ALL images? This cannot be undone.">
+      <button type="submit" class="btn btn-danger">Clear all</button>
+    </form>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-value" data-stat="count">{{ total_images }}</span>
+      <span class="stat-label">images</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" data-stat="size">{{ total_size }}</span>
+      <span class="stat-label">total space</span>
+    </div>
+  </div>
+
+  {% if items %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>URL</th>
+        <th>Size</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr class="img-row" data-filename="{{ item.filename }}">
+        <td class="cell-url"><a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.url }}</a></td>
+        <td class="cell-size">{{ item.size }}</td>
+        <td class="cell-date nowrap">{{ item.created }}</td>
+        <td class="cell-actions">
+          <div class="row-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-copy="{{ item.url }}"
+                    title="Copy the direct link">Copy</button>
+            <form method="post" action="/admin/delete" class="inline-form"
+                  data-confirm="Delete this image?">
+              <input type="hidden" name="filename" value="{{ item.filename }}">
+              <input type="hidden" name="page" value="{{ page }}">
+              <button type="submit" class="btn btn-danger-soft btn-sm">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination">
+    {% if page > 1 %}
+    <a class="btn btn-ghost btn-sm" href="/admin?page={{ page - 1 }}">&larr; Previous</a>
+    {% endif %}
+    <span class="page-indicator">Page {{ page }} of {{ max_page }}</span>
+    {% if page < max_page %}
+    <a class="btn btn-ghost btn-sm" href="/admin?page={{ page + 1 }}">Next &rarr;</a>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="empty-state">No images yet. <a href="/">Upload the first one</a>.</div>
+  {% endif %}
+</section>
+
+<script src="/static/admin.js"></script>
+{% endblock %}

@@ -1,0 +1,489 @@
+/* img-to-url — single stylesheet, no external dependencies. Light and dark
+   themes: the dark palette below follows the browser / OS setting on its
+   own (no toggle). Every color is a token here, so both themes cover it. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f2f4fa;
+  --bg-soft: #e9edf7;
+  --surface: #ffffff;
+  --text: #1d2433;
+  --text-muted: #5b6475;
+  --border: #d9dfec;
+  --border-hover: #b9c3dc;
+  --primary: #4f6df5;
+  --primary-strong: #3b55d9;
+  --primary-soft: #e8edff;
+  --primary-border: #ccd8ff;
+  --link: #3b55d9;
+  --accent: #087f57;        /* white text on it: 5.0:1 (was #0e9f6e, 3.4:1) */
+  --accent-strong: #06663f;
+  --danger: #d92d20;
+  --danger-strong: #b42318;
+  --danger-soft: #fee4e2;
+  --danger-text: #b42318;   /* outlined Delete buttons */
+  --danger-border: #f5c2bd;
+  --error-text: #912018;    /* error alerts */
+  --error-border: #fecdca;
+  --radius: 12px;
+  --shadow: 0 6px 24px rgba(29, 36, 51, 0.08);
+}
+
+/* Dark theme. Text pairs keep at least 4.5:1 contrast (most 6-15:1); the
+   saturated button colors and white button text work on both themes. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f141d;
+    --bg-soft: #151c29;
+    --surface: #19202d;
+    --text: #e5e9f0;
+    --text-muted: #a0a9ba;
+    --border: #2c3547;
+    --border-hover: #48536c;
+    --primary-soft: #1c2645;
+    --primary-border: #33437a;
+    --link: #93a6ff;
+    --danger-soft: #3a1a18;
+    --danger-text: #ff9e94;
+    --danger-border: #6e2b26;
+    --error-text: #ffb3ab;
+    --error-border: #5c2622;
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 100%);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------ top bar */
+
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-inner {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* A long SITE_NAME is truncated instead of pushing the nav off-screen. */
+.brand-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.topnav { display: flex; align-items: center; gap: 0.9rem; flex: none; }
+
+.topnav-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+}
+
+.topnav-link:hover { color: var(--text); background: var(--bg); }
+.topnav-link.active { color: var(--link); background: var(--primary-soft); }
+
+/* ------------------------------------------------ layout */
+
+.container {
+  flex: 1;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.75rem;
+}
+
+.card-auth { max-width: 400px; margin: 3rem auto; }
+
+.card-title { margin: 0 0 0.35rem; font-size: 1.35rem; }
+
+.footer {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.muted { color: var(--text-muted); margin: 0 0 1rem; }
+.small { font-size: 0.8rem; }
+.hidden { display: none !important; }
+.nowrap { white-space: nowrap; }
+.inline-form { display: inline; }
+
+kbd {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 0.8em;
+  font-family: inherit;
+}
+
+/* ------------------------------------------------ buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.925rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* The file picker button is a <label> around a visually hidden input. */
+label.btn:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-strong); }
+
+.btn-accent { background: var(--accent); color: #fff; }
+.btn-accent:hover { background: var(--accent-strong); }
+
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { background: var(--danger-strong); }
+
+/* Quieter variant for the per-row Delete buttons in the admin table. */
+.btn-danger-soft { background: transparent; color: var(--danger-text); border-color: var(--danger-border); }
+.btn-danger-soft:hover { background: var(--danger-soft); border-color: var(--danger); }
+
+.btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.btn-ghost:hover { color: var(--text); background: var(--bg); }
+
+.btn-sm { padding: 0.4rem 0.75rem; font-size: 0.82rem; }
+.btn-block { width: 100%; }
+
+/* "Copied!" feedback, also used on the admin rows' outlined Copy buttons. */
+.copied { background: var(--accent-strong) !important; color: #fff !important; border-color: transparent !important; }
+
+/* ------------------------------------------------ dropzone */
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.dropzone:hover { border-color: var(--border-hover); }
+
+.dropzone.dragging,
+.dropzone:focus-visible { border-color: var(--primary); background: var(--primary-soft); outline: none; }
+
+.dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.dropzone-icon { color: var(--primary); }
+.dropzone-hint { margin: 0; font-size: 1.05rem; color: var(--text); }
+
+/* ------------------------------------------------ forms */
+
+.stack { display: flex; flex-direction: column; gap: 1rem; }
+
+.field { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.9rem; font-weight: 500; }
+
+.field input {
+  font: inherit;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.field input:focus { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Temporary field admin.js copies from when the Clipboard API is missing
+   (plain http). Fixed position, so selecting it never scrolls the page. */
+.clipboard-helper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------ status / result / alerts */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+  color: var(--text-muted);
+}
+
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.alert {
+  margin-top: 1.25rem;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+.alert-error { background: var(--danger-soft); color: var(--error-text); border: 1px solid var(--error-border); }
+
+.result {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-border);
+}
+
+/* Thumbnail of the uploaded file — a pasted clipboard image is otherwise
+   never shown, so this confirms the right one went up. */
+.result-preview {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 7rem;
+  height: 7rem;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.result-preview img { display: block; max-width: 100%; max-height: 100%; }
+
+.result-body { flex: 1; min-width: 0; }
+
+.result-heading { margin: 0 0 0.75rem; font-size: 0.95rem; }
+
+.result-row { display: flex; gap: 0.6rem; }
+
+.result-row input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.result-meta { margin: 0.75rem 0 0; }
+
+.upload-note { margin: 1.25rem 0 0; text-align: center; }
+
+/* ------------------------------------------------ admin */
+
+.admin-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.stats {
+  display: flex;
+  gap: 1rem;
+  margin: 1.25rem 0;
+  flex-wrap: wrap;
+}
+
+.stat {
+  flex: 1 1 10rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.stat-value { font-size: 1.6rem; font-weight: 700; }
+.stat-label { color: var(--text-muted); font-size: 0.85rem; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 2px solid var(--border);
+}
+
+.table td {
+  padding: 0.65rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.cell-url {
+  max-width: 380px;
+  overflow-wrap: anywhere;
+}
+
+.cell-url a {
+  color: var(--link);
+  text-decoration: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.cell-url a:hover { text-decoration: underline; }
+.cell-actions { text-align: right; }
+.row-actions { display: inline-flex; gap: 0.4rem; }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.page-indicator { color: var(--text-muted); font-size: 0.9rem; }
+
+.empty-state {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+}
+
+.empty-state a { color: var(--link); }
+
+/* ------------------------------------------------ responsive */
+
+@media (max-width: 640px) {
+  .card { padding: 1.25rem; }
+  .container { padding: 1.25rem; }
+  .result { flex-direction: column; align-items: stretch; }
+  .result-preview { width: 100%; height: 10rem; }
+  .result-row { flex-direction: column; align-items: stretch; }
+
+  /* Tighten the nav rather than hiding it, so Admin stays reachable. */
+  .topnav { gap: 0.25rem; }
+  .topnav-link { padding: 0.35rem 0.5rem; }
+
+  /* Admin table: one stacked block per image instead of four columns
+     that overflow the card — URL on top, then size, date and Delete. */
+  .table thead { display: none; }
+  .table, .table tbody { display: block; }
+  .table tr {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.35rem 0.75rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .table td { padding: 0; border: 0; }
+  .table .cell-url { grid-column: 1 / -1; max-width: none; }
+  .table .cell-size,
+  .table .cell-date { color: var(--text-muted); font-size: 0.82rem; white-space: normal; }
+}
+
+@media (max-width: 420px) {
+  .brand-name { display: none; }  /* the badge still carries the brand */
+}

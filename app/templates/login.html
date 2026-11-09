@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Log in &middot; {{ site_name }}{% endblock %}
+{% block topnav %}{% endblock %}
+{# Anonymous visitors get the 404 page at /, so keep the brand on this page. #}
+{% block brand_href %}/login{% endblock %}
+{% block content %}
+<section class="card card-auth">
+  <h1 class="card-title">Welcome back</h1>
+  <p class="muted">Sign in to upload images and manage your links.</p>
+
+  {% if error %}
+  <div class="alert alert-error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/login" class="stack">
+    <label class="field">
+      <span>Username</span>
+      <input type="text" name="username" autocomplete="username" autofocus required>
+    </label>
+    <label class="field">
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit" class="btn btn-primary btn-block">Log in</button>
+  </form>
+</section>
+{% endblock %}

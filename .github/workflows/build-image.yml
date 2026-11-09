@@ -1,0 +1,25 @@
+name: Build and Export Docker Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-export:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --no-cache -t img-to-url:latest .
+
+      - name: Save and compress Docker image
+        run: docker save img-to-url:latest | gzip > img-to-url.tar.gz
+
+      - name: Upload Docker image as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: img-to-url-image
+          path: img-to-url.tar.gz
+          retention-days: 1
