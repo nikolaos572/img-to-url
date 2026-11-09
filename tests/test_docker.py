@@ -234,6 +234,18 @@ class TestDockerSmoke:
         assert gone.headers["Content-Type"].startswith("text/html")
         assert "<h1>404 Not Found</h1>" in gone.text
 
+    def test_post_from_another_origin_is_refused(self, base_url, session):
+        upload = session.post(
+            f"{base_url}/upload", files={"file": ("keep.png", PNG_BYTES)}
+        ).json()
+        response = session.post(
+            f"{base_url}/admin/clear-all",
+            headers={"Origin": "https://evil.example"},
+            allow_redirects=False,
+        )
+        assert response.status_code == 403
+        assert requests.get(upload["url"]).status_code == 200  # nothing deleted
+
     def test_clear_all_leaves_empty_state(self, base_url, session):
         session.post(f"{base_url}/upload", files={"file": ("x.png", PNG_BYTES)})
         response = session.post(f"{base_url}/admin/clear-all", allow_redirects=False)

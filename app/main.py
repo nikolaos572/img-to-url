@@ -13,7 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import Headers, UploadFile
 from starlette.staticfiles import StaticFiles
@@ -21,7 +21,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app import auth, db, images
 from app.cleanup import start_cleanup_thread
-from app.config import Settings
+from app.config import Settings, url_origin
 
 log = logging.getLogger("img-to-url")
 
@@ -32,6 +32,7 @@ UPLOAD_CHUNK = 1024 * 1024  # 1 MiB
 MAX_FILENAME_ATTEMPTS = 5
 MAX_FORM_BODY = 64 * 1024  # login / admin forms are a few hundred bytes
 MULTIPART_SLACK = 64 * 1024  # boundaries + part headers around an uploaded file
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -74,6 +75,37 @@ class BodySizeLimitMiddleware:
             return message
 
         await self.app(scope, limited_receive, send)
+
+
+class SameOriginMiddleware:
+    """Refuse state-changing requests that a browser sent from another site.
+
+    Browsers put the sending page's origin in an Origin header on every
+    POST. Unless it is exactly BASE_URL's origin, the request was made by
+    another site (a sibling subdomain included, which SameSite=Lax cookies
+    don't stop) or the app was opened at an address other than BASE_URL. It
+    is refused before authentication and before the body is read. Requests
+    without the header don't come from a browser (curl, scripts), so no
+    other site can forge them; they pass and still need a session cookie.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        allowed_origin: str | None,
+        refuse: Callable[[Request, str], Response],
+    ) -> None:
+        self.app = app
+        self.allowed_origin = allowed_origin
+        self.refuse = refuse  # (request, its Origin header) -> response to send
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] not in SAFE_METHODS:
+            origin = Headers(scope=scope).get("origin")
+            if origin is not None and url_origin(origin) != self.allowed_origin:
+                await self.refuse(Request(scope), origin)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -132,9 +164,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return settings.max_size_bytes + MULTIPART_SLACK, too_large
         return MAX_FORM_BODY, "Request body is too large."
 
-    # Added before security_headers so that one stays the outer middleware
-    # and its headers land on these 413 responses too.
+    def refuse_other_origin(request: Request, origin: str) -> Response:
+        log.warning(
+            "Refused %s %s sent from %r: not BASE_URL's origin %s",
+            request.method, request.url.path, origin, settings.origin,
+        )
+        message = (
+            f"This site's address is set to {settings.origin} (BASE_URL), but "
+            f"this request came from {origin}. Open {settings.origin}/login, "
+            "or set BASE_URL to the address you use."
+        )
+        if request.url.path == "/login":
+            return templates.TemplateResponse(
+                request, "login.html", {"error": message}, status_code=403
+            )
+        return JSONResponse({"detail": message}, status_code=403)
+
+    # Both added before security_headers so that one stays the outer
+    # middleware and its headers land on their 413 and 403 responses too.
+    # The origin check runs first: a refused request isn't read at all.
     app.add_middleware(BodySizeLimitMiddleware, limits=body_limit)
+    app.add_middleware(
+        SameOriginMiddleware, allowed_origin=settings.origin, refuse=refuse_other_origin
+    )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

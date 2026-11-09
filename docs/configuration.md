@@ -7,7 +7,7 @@ Everything is set with environment variables; there are no config files.
 | Variable | Default | Description |
 |---|---|---|
 | `APP_PASSWORD` | *(required)* | Password for the single `user` account. |
-| `BASE_URL` | `http://localhost:8000` | Public base URL used to build image links, e.g. `https://images.example.com`. Trailing slash is stripped. |
+| `BASE_URL` | `http://localhost:8000` | The address you open the app at, e.g. `https://images.example.com`. Image links are built from it, and logins, uploads and other form submissions a browser sends from any other address are refused. Trailing slash is stripped. |
 | `SITE_NAME` | `img-to-url` | Name shown in the browser tab title, top bar and footer. |
 | `IMG_MAX_SIZE` | `10` | Maximum upload size in **MB**. |
 | `IMG_EXPIRATION_HOURS` | `0` (disabled) | Images older than this many hours are deleted by the daily 05:00 cleanup job. |
@@ -70,14 +70,16 @@ docker run --rm --user 0 -v /srv/img-to-url:/data img-to-url:latest chown 61001:
 
 ## Troubleshooting
 
-### Login is accepted but then shows *404 Not Found*
+### Login says "This site's address is set to …"
 
-After a login the app redirects to `/`, which is a 404 for anyone without a
-valid session. If `BASE_URL` is `https://...`, the session cookie is `Secure`,
-and browsers won't send it over plain HTTP. So `https://images.example.com`
-works, but `http://server-ip:8000` will never log in. Always reach the app
-through the URL you configured as `BASE_URL`, or set `BASE_URL` to the
-`http://...` address when testing locally.
+The page was opened at a different address than `BASE_URL`, for example
+`http://server-ip:8000` while `BASE_URL` is `https://images.example.com`. The
+app only accepts logins, uploads and other form submissions from the
+`BASE_URL` address, so that other sites can't forge them. Scheme, host and
+port all have to match: `http://localhost:8000` and `http://127.0.0.1:8000`
+are different addresses. Open the app at `BASE_URL`, or set `BASE_URL` to the
+address you use, such as `http://server-ip:8000` while testing without a
+reverse proxy.
 
 ### Permission errors on `/data`
 

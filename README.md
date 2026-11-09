@@ -40,9 +40,10 @@ and paste an image. While logged out, the address itself only shows a
 *404 Not Found* page, so bookmark `/login`.
 
 > **Open the app at the address in `BASE_URL`.** Image links are built from
-> it, and with an `https://` address the browser only keeps the login cookie
-> over HTTPS, so logging in at `http://your-host:8000` fails. To try the app
-> before your HTTPS reverse proxy is ready, start it with
+> it, and to block forged requests from other sites, the app refuses logins
+> and uploads sent from any other address, such as `http://your-host:8000`
+> when `BASE_URL` is `https://images.example.com`. To try the app before your
+> HTTPS reverse proxy is ready, start it with
 > `-e BASE_URL='http://your-host:8000'` and open `http://your-host:8000/login`.
 
 > Mount the volume at **`/data`**. That's where the app keeps the database and

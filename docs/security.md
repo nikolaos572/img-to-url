@@ -34,8 +34,13 @@ page covers what you need to set up yourself and what the app already does.
 - **Logging out ends the session on the server**, not just in your browser:
   the cookie stops working, including any copy of it taken earlier. Changing
   `APP_PASSWORD` ends every session at once.
-- All state-changing endpoints are POST, and with `SameSite=Lax` that blocks
-  cross-site form submissions.
+- All state-changing endpoints are POST, and a POST whose `Origin` header
+  isn't exactly `BASE_URL`'s scheme, host and port is refused (403) before
+  anything else happens. That stops forged submissions from every other
+  site, including sibling subdomains such as `blog.example.com`, which
+  `SameSite=Lax` cookies alone let through. Browsers always send `Origin` on
+  POST; requests without it (curl, scripts) can't be forged by a web page,
+  so they're allowed and still need a valid session cookie.
 - The container runs as an unprivileged user, UID/GID 61001, not root. The
   number is above the range Linux gives to real accounts (up to 60000), so it
   won't match a host login. That matters if someone ever breaks out of the

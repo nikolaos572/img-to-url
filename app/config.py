@@ -6,6 +6,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 #: Fallback when no BASE_URL is provided (local development / docker run without a proxy).
 DEFAULT_BASE_URL = "http://localhost:8000"
@@ -17,8 +18,35 @@ DEFAULT_SITE_NAME = "img-to-url"
 SESSION_DAYS = 30
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
 class ConfigError(RuntimeError):
     """Raised when an environment variable is missing or invalid."""
+
+
+def url_origin(url: str) -> str | None:
+    """The origin of an http(s) URL, written one way: scheme://host[:port].
+
+    Scheme and host are lowercased and the scheme's default port dropped, so
+    https://Images.Example.com:443/x and https://images.example.com give the
+    same result, the form browsers use in their Origin header. None when
+    there's no http(s) scheme, no host or an invalid port ("null", say).
+    """
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    host = parts.hostname  # lowercased, IPv6 brackets removed
+    if scheme not in _DEFAULT_PORTS or not host:
+        return None
+    if ":" in host:
+        host = f"[{host}]"
+    if port is None or port == _DEFAULT_PORTS[scheme]:
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
 
 
 @dataclass(frozen=True)
@@ -58,6 +86,11 @@ class Settings:
         return f"public, max-age={self.image_cache_minutes * 60}"
 
     @property
+    def origin(self) -> str | None:
+        """BASE_URL's origin: the only one whose browser POSTs are accepted."""
+        return url_origin(self.base_url)
+
+    @property
     def cookie_secure(self) -> bool:
         return self.base_url.startswith("https://")
 
@@ -81,9 +114,10 @@ class Settings:
             )
 
         base_url = env.get("BASE_URL", DEFAULT_BASE_URL).strip().rstrip("/")
-        if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        if url_origin(base_url) is None:
             raise ConfigError(
-                f"BASE_URL must start with http:// or https:// (got {base_url!r})."
+                "BASE_URL must be an http:// or https:// address with a host "
+                f"name, e.g. https://images.example.com (got {base_url!r})."
             )
 
         max_size_mb = _env_float(env, "IMG_MAX_SIZE", default=10.0, minimum=0.001)

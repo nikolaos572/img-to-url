@@ -14,8 +14,10 @@ APP_PASSWORD=dev uvicorn app.main:app --reload
 installing it alongside the project runs your code and the tests against
 the same packages that ship.
 
-Open `http://localhost:8000/login` and log in as `user` / `dev`. The database
-and images go to `./data`, which git ignores. Every setting is an environment
+Open `http://localhost:8000/login` and log in as `user` / `dev`. Use exactly
+that address: it's the default `BASE_URL`, and logins from any other one,
+`http://127.0.0.1:8000` included, are refused. The database and images go to
+`./data`, which git ignores. Every setting is an environment
 variable; see [Configuration](configuration.md).
 
 ## Tests
