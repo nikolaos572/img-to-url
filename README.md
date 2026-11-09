@@ -22,6 +22,7 @@ Built with **Python 3.12, FastAPI, uvicorn and SQLite (WAL)**. No config files â
 docker build -t img-to-url:latest .
 
 docker run -d --name img-to-url \
+  --restart unless-stopped \
   -p 8000:8000 \
   -e APP_PASSWORD='change-me' \
   -e BASE_URL='https://images.example.com' \
@@ -52,7 +53,8 @@ and paste an image. While logged out, the address itself only shows a
 > to **UID/GID 61001** first, the user the app runs as:
 > `sudo chown 61001:61001 /your/dir`. See [Configuration](docs/configuration.md#storage).
 
-`APP_PASSWORD` is the only required variable.
+`APP_PASSWORD` is the only required variable. `--restart unless-stopped`
+starts the app again after a crash or a reboot, so shared links keep working.
 
 ## Documentation
 
