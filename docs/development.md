@@ -6,12 +6,18 @@ Requires Python 3.12 or newer.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements.txt -e ".[dev]"
 APP_PASSWORD=dev uvicorn app.main:app --reload
 ```
 
-Open `http://localhost:8000/login` and log in as `user` / `dev`. The database
-and images go to `./data`, which git ignores. Every setting is an environment
+`requirements.txt` holds the exact versions the Docker image uses, so
+installing it alongside the project runs your code and the tests against
+the same packages that ship.
+
+Open `http://localhost:8000/login` and log in as `user` / `dev`. Use exactly
+that address: it's the default `BASE_URL`, and logins from any other one,
+`http://127.0.0.1:8000` included, are refused. The database and images go to
+`./data`, which git ignores. Every setting is an environment
 variable; see [Configuration](configuration.md).
 
 ## Tests
@@ -24,6 +30,25 @@ python -m pytest tests/test_docker.py -v -m docker   # Docker smoke tests (needs
 The Docker smoke tests build the image, run it with `WORKERS=4` and drive the
 full flow (login, upload, public link, admin, delete, clear all) over real
 HTTP.
+
+## Updating dependencies
+
+`pyproject.toml` lists the allowed version ranges. `requirements.txt` pins
+the exact version of every package, indirect ones included, and the image
+installs only that list (the build fails if it is incomplete). To move to
+newer versions, change a range in `pyproject.toml` if needed and regenerate
+the list inside the same Python image the Dockerfile uses:
+
+```bash
+docker run --rm -v "$PWD":/src:ro python:3.12-slim sh -c '
+  mkdir /tmp/p && cp -r /src/pyproject.toml /src/app /tmp/p &&
+  pip install -q --disable-pip-version-check --root-user-action=ignore /tmp/p &&
+  { grep "^#" /src/requirements.txt; pip freeze --exclude img-to-url; }' > requirements.new
+mv requirements.new requirements.txt
+```
+
+Then reinstall (`pip install -r requirements.txt -e ".[dev]"`) and run both
+test suites, Docker included, before committing the new list.
 
 ## Things to keep in mind
 

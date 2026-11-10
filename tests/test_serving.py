@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-from .conftest import make_jpeg, make_png, upload
+from .conftest import make_jpeg, make_png, stored_bytes, upload
 
 # The exact page shown for deleted / non-existent links (templates/404.html).
 NOT_FOUND_PAGE = (
@@ -17,9 +17,10 @@ NOT_FOUND_PAGE = (
 
 
 def _upload_one(auth_client, name="x.png", content=None):
+    """Upload an image; returns its filename and the bytes stored for it."""
     content = content if content is not None else make_png(32)
-    data = upload(auth_client, name, content).json()
-    return data["filename"], content
+    filename = upload(auth_client, name, content).json()["filename"]
+    return filename, stored_bytes(auth_client, filename)
 
 
 class TestPublicServing:
@@ -171,13 +172,23 @@ class TestCspAndExternalScripts:
         assert "default-src 'self'" in response.headers["content-security-policy"]
         assert response.headers["x-frame-options"] == "DENY"
 
-    def test_non_html_responses_have_no_csp(self, auth_client):
-        # CSP applies to documents; files and JSON carry no policy.
-        filename, _ = _upload_one(auth_client)
-        for path in ["/static/style.css", "/healthz", "/" + filename]:
+    def test_static_files_and_json_have_no_csp(self, auth_client):
+        # CSP applies to documents; the site's own files and JSON carry none.
+        for path in ["/static/style.css", "/healthz"]:
             response = auth_client.get(path)
             assert response.status_code == 200, path
             assert "content-security-policy" not in response.headers, path
+
+    def test_served_images_are_sandboxed(self, client, auth_client):
+        # Opened directly, even a crafted file may neither run nor load
+        # anything. Embedding the image elsewhere is unaffected.
+        filename, _ = _upload_one(auth_client)
+        for response in (client.get("/" + filename), client.head("/" + filename)):
+            assert response.status_code == 200
+            assert response.headers["content-security-policy"] == (
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+            )
+            assert response.headers["x-content-type-options"] == "nosniff"
 
     def test_upload_page_uses_external_script_only(self, auth_client):
         html = auth_client.get("/").text

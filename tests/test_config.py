@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError, Settings
+from app.config import ConfigError, Settings, url_origin
 
 
 def test_defaults():
@@ -43,9 +43,42 @@ def test_missing_password_raises():
         Settings.from_env({})
 
 
-def test_invalid_base_url_raises():
-    with pytest.raises(ConfigError, match="BASE_URL"):
-        Settings.from_env({"APP_PASSWORD": "pw", "BASE_URL": "ftp://nope"})
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ftp://nope",
+        "images.example.com",  # no scheme
+        "https://",  # no host
+        "https://:443",
+        "https://images.example.com:99999",  # port out of range
+        "https://images.example.com:abc",
+    ],
+)
+def test_invalid_base_url_raises(raw):
+    with pytest.raises(ConfigError, match="BASE_URL must be an http:// or https:// address"):
+        Settings.from_env({"APP_PASSWORD": "pw", "BASE_URL": raw})
+
+
+@pytest.mark.parametrize(
+    "base_url,origin",
+    [
+        ("https://images.example.com", "https://images.example.com"),
+        ("https://Images.Example.COM/", "https://images.example.com"),
+        ("https://images.example.com:443", "https://images.example.com"),
+        ("http://images.example.com:80/sub/path", "http://images.example.com"),
+        ("http://localhost:8000", "http://localhost:8000"),
+        ("https://images.example.com:8443", "https://images.example.com:8443"),
+        ("http://[::1]:8000", "http://[::1]:8000"),
+    ],
+)
+def test_origin_is_base_url_scheme_host_and_port(base_url, origin):
+    settings = Settings.from_env({"APP_PASSWORD": "pw", "BASE_URL": base_url})
+    assert settings.origin == origin
+
+
+@pytest.mark.parametrize("value", ["null", "", "file:///etc", "https://", "http://x:abc"])
+def test_url_origin_of_non_origins_is_none(value):
+    assert url_origin(value) is None
 
 
 @pytest.mark.parametrize(
@@ -109,6 +142,37 @@ def test_port_and_workers_validation():
         Settings.from_env({"APP_PASSWORD": "pw", "PORT": "99999"})
     with pytest.raises(ConfigError, match="WORKERS"):
         Settings.from_env({"APP_PASSWORD": "pw", "WORKERS": "x"})
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("", ""),
+        ("172.17.0.1", "172.17.0.1"),
+        (" 172.18.0.0/16 , 10.0.0.5 ", "172.18.0.0/16,10.0.0.5"),
+        ("::1,fd00::/8", "::1,fd00::/8"),
+        ("*", "*"),
+    ],
+)
+def test_forwarded_allow_ips(raw, expected):
+    settings = Settings.from_env({"APP_PASSWORD": "pw", "FORWARDED_ALLOW_IPS": raw})
+    assert settings.forwarded_allow_ips == expected
+
+
+@pytest.mark.parametrize(
+    "raw,problem",
+    [
+        ("172.17.0.1/16", "'172.17.0.1/16' is not one (172.17.0.1/16 has host bits set)"),
+        ("proxy.example.com", "'proxy.example.com' is not one"),
+        ("10.0.0.1,", "'' is not one"),
+        ("*,10.0.0.1", "'*' is not one"),
+        ("300.1.1.1", "'300.1.1.1' is not one"),
+    ],
+)
+def test_invalid_forwarded_allow_ips_raises(raw, problem):
+    with pytest.raises(ConfigError, match="FORWARDED_ALLOW_IPS must be IP addresses") as error:
+        Settings.from_env({"APP_PASSWORD": "pw", "FORWARDED_ALLOW_IPS": raw})
+    assert problem in str(error.value)
 
 
 def test_custom_session_secret():

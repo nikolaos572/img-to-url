@@ -11,7 +11,7 @@ import logging
 import threading
 from datetime import datetime
 
-from app import db
+from app import db, images
 from app.config import Settings
 
 log = logging.getLogger("img-to-url.cleanup")
@@ -31,15 +31,11 @@ def cleanup_expired(settings: Settings, now: datetime | None = None) -> list[str
 
     removed = []
     for filename in filenames:
-        try:
-            (settings.images_dir / filename).unlink(missing_ok=True)
-        except OSError as exc:
-            # Keep the row so the next run retries it, and don't let one
-            # stuck file block every other expired image.
-            log.warning("Could not delete expired image %s: %s", filename, exc)
-            continue
-        db.delete_image(settings.db_path, filename)
-        removed.append(filename)
+        # A file that can't be deleted keeps its row, so the next run
+        # retries it, and doesn't block the other expired images.
+        if images.delete_file(settings.images_dir, filename):
+            db.delete_image(settings.db_path, filename)
+            removed.append(filename)
 
     if removed:
         log.info("Cleanup removed %d expired image(s)", len(removed))

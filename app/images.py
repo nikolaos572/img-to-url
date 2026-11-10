@@ -1,4 +1,4 @@
-"""Image file validation, naming and serving helpers.
+"""Image file validation, naming, serving and deletion helpers.
 
 SVG is intentionally NOT in the allowlist: serving uploaded SVG inline lets a
 crafted file run scripts on the public image URL. Every other common web image
@@ -7,9 +7,13 @@ format is accepted.
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
+
+log = logging.getLogger("img-to-url.images")
 
 ALLOWED_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"})
 
@@ -76,6 +80,21 @@ def random_filename(ext: str) -> str:
 def is_valid_filename(filename: str) -> bool:
     # fullmatch, not match: "$" also matches just before a trailing newline.
     return bool(FILENAME_RE.fullmatch(filename))
+
+
+def delete_file(images_dir: Path, filename: str) -> bool:
+    """Delete an image file; one that is already gone counts as deleted.
+
+    Returns False, with a warning in the log, when the file can't be
+    removed. Callers then keep the image's row, so it stays listed and a
+    later attempt retries it.
+    """
+    try:
+        (images_dir / filename).unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("Could not delete image %s: %s", filename, exc)
+        return False
+    return True
 
 
 def media_type_for(filename: str) -> str:

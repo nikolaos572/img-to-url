@@ -9,8 +9,10 @@ as docs/configuration.md describes.
 
 from __future__ import annotations
 
+import io
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -19,6 +21,9 @@ from pathlib import Path
 
 import pytest
 import requests
+from PIL import Image
+
+from .conftest import make_image
 
 pytestmark = pytest.mark.docker
 
@@ -26,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 IMAGE_TAG = "img-to-url:test"
 CONTAINER_NAME = "img-to-url-smoke"
 CONTAINER_PASSWORD = "docker-test-pw"
-PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"smoke" * 40
+PNG_BYTES = make_image("png")
 APP_UID_GID = "61001:61001"
 
 
@@ -87,6 +92,27 @@ def _login(url: str) -> requests.Session:
     )
     assert response.status_code == 303, response.text
     return http
+
+
+def _logged_client(container: str, url: str, forwarded_for: str) -> str:
+    """Send a request claiming to be forwarded for an address; return the
+    client address the container's access log shows for it."""
+    marker = secrets.token_hex(8)
+    requests.get(f"{url}/healthz?probe={marker}", headers={"X-Forwarded-For": forwarded_for})
+    pattern = re.compile(rf'(\S+):\d+ - "GET /healthz\?probe={marker} ')
+    deadline = time.time() + 10
+    while True:
+        logs = _run_docker("logs", container)
+        match = pattern.search(logs.stdout + logs.stderr)
+        if match or time.time() > deadline:
+            assert match, logs.stdout + logs.stderr
+            return match.group(1)
+        time.sleep(0.2)
+
+
+def _pixels(data: bytes) -> bytes:
+    with Image.open(io.BytesIO(data)) as image:
+        return image.convert("RGBA").tobytes()
 
 
 def _process_owners(container: str) -> set[str]:
@@ -183,7 +209,6 @@ class TestDockerSmoke:
         )
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["size"] == len(PNG_BYTES)
         assert re.fullmatch(
             r"image-[0-9a-f]{16}-[0-9a-f]{16}\.png", data["filename"]
         )
@@ -192,7 +217,8 @@ class TestDockerSmoke:
         # The direct link is public: no session cookie required.
         public = requests.get(data["url"])
         assert public.status_code == 200
-        assert public.content == PNG_BYTES
+        assert len(public.content) == data["size"]
+        assert _pixels(public.content) == _pixels(PNG_BYTES)
         assert public.headers["Content-Type"] == "image/png"
         # IMG_CACHE_MINUTES is not set on this container: no caching.
         assert public.headers["Cache-Control"] == "no-store"
@@ -200,7 +226,32 @@ class TestDockerSmoke:
         # HEAD works too (link-preview bots and uptime monitors use it).
         head = requests.head(data["url"])
         assert head.status_code == 200
-        assert head.headers["Content-Length"] == str(len(PNG_BYTES))
+        assert head.headers["Content-Length"] == str(data["size"])
+
+    @pytest.mark.parametrize("ext", ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"])
+    def test_every_allowed_format_can_be_uploaded(self, base_url, session, ext):
+        # Pillow in the image must decode and encode all of them (AVIF too).
+        response = session.post(
+            f"{base_url}/upload", files={"file": (f"pic.{ext}", make_image(ext))}
+        )
+        assert response.status_code == 200, response.text
+        public = requests.get(response.json()["url"])
+        assert Image.open(io.BytesIO(public.content)).size == (16, 16)
+
+    def test_photo_metadata_is_not_published(self, base_url, session):
+        exif = Image.Exif()
+        exif[0x010F] = "PhoneMaker"
+        exif.get_ifd(0x8825).update({1: "N", 2: (40.0, 18.0, 0.0)})
+        photo = io.BytesIO()
+        Image.new("RGB", (32, 32), "orange").save(photo, "JPEG", exif=exif)
+        assert b"PhoneMaker" in photo.getvalue()
+
+        response = session.post(
+            f"{base_url}/upload", files={"file": ("photo.jpg", photo.getvalue())}
+        )
+        public = requests.get(response.json()["url"]).content
+        assert b"PhoneMaker" not in public
+        assert not Image.open(io.BytesIO(public)).getexif()
 
     def test_anonymous_upload_rejected(self, base_url):
         response = requests.post(
@@ -233,6 +284,18 @@ class TestDockerSmoke:
         assert gone.status_code == 404
         assert gone.headers["Content-Type"].startswith("text/html")
         assert "<h1>404 Not Found</h1>" in gone.text
+
+    def test_post_from_another_origin_is_refused(self, base_url, session):
+        upload = session.post(
+            f"{base_url}/upload", files={"file": ("keep.png", PNG_BYTES)}
+        ).json()
+        response = session.post(
+            f"{base_url}/admin/clear-all",
+            headers={"Origin": "https://evil.example"},
+            allow_redirects=False,
+        )
+        assert response.status_code == 403
+        assert requests.get(upload["url"]).status_code == 200  # nothing deleted
 
     def test_clear_all_leaves_empty_state(self, base_url, session):
         session.post(f"{base_url}/upload", files={"file": ("x.png", PNG_BYTES)})
@@ -268,6 +331,36 @@ class TestDockerSmoke:
         assert statuses == [200] * 8
 
 
+class TestVisitorAddressInLogs:
+    """The access log shows the visitor's address from X-Forwarded-For only
+    when FORWARDED_ALLOW_IPS names the proxy, as docs/configuration.md says."""
+
+    def test_forwarded_for_counts_only_from_a_trusted_proxy(self, docker_image, base_url):
+        # The smoke container trusts no proxy, so a client can't put any
+        # address it likes in the log: the real peer is logged instead.
+        peer = _logged_client(CONTAINER_NAME, base_url, forwarded_for="203.0.113.7")
+        assert peer != "203.0.113.7"
+
+        # Trust exactly that peer, the way the docs describe finding it.
+        name = f"{CONTAINER_NAME}-proxy"
+        port = _free_port()
+        url = f"http://127.0.0.1:{port}"
+        _run_docker("rm", "-f", name, check=False)
+        try:
+            _run_docker(
+                "run", "-d", "--name", name,
+                "-p", f"127.0.0.1:{port}:8000",
+                "-e", f"APP_PASSWORD={CONTAINER_PASSWORD}",
+                "-e", f"BASE_URL={url}",
+                "-e", f"FORWARDED_ALLOW_IPS={peer}",
+                docker_image,
+            )
+            _wait_until_healthy(url, name)
+            assert _logged_client(name, url, forwarded_for="203.0.113.7") == "203.0.113.7"
+        finally:
+            _run_docker("rm", "-f", name, check=False)
+
+
 class TestHostDirectory:
     def test_host_directory_given_to_61001_works(self, docker_image, tmp_path):
         """The setup docs/configuration.md describes for a host directory."""
@@ -300,7 +393,7 @@ class TestHostDirectory:
                 f"{url}/upload", files={"file": ("host.png", PNG_BYTES)}
             )
             assert response.status_code == 200, response.text
-            assert requests.get(response.json()["url"]).content == PNG_BYTES
+            assert _pixels(requests.get(response.json()["url"]).content) == _pixels(PNG_BYTES)
 
             stored = f"/data/images/{response.json()['filename']}"
             owners = _run_docker(

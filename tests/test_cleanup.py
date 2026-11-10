@@ -32,9 +32,9 @@ def make_settings(tmp_path, expiration_hours):
 
 
 def _add(settings, filename, age_hours):
-    (settings.images_dir / filename).write_bytes(b"x")
     created_at = datetime.now().timestamp() - age_hours * 3600
-    db.insert_image(settings.db_path, filename, 1, int(created_at))
+    with db.adding_image(settings.db_path, filename, 1, int(created_at)):
+        (settings.images_dir / filename).write_bytes(b"x")
 
 
 def _name(hex_char):
@@ -89,8 +89,8 @@ class TestCleanupExpired:
         settings = make_settings(tmp_path, expiration_hours=72)
         row = _name("0")
         created_at = 1_700_000_000
-        (settings.images_dir / row).write_bytes(b"x")
-        db.insert_image(settings.db_path, row, 1, created_at)
+        with db.adding_image(settings.db_path, row, 1, created_at):
+            (settings.images_dir / row).write_bytes(b"x")
 
         # 71 hours after creation: still fresh.
         fresh_moment = datetime.fromtimestamp(created_at + 71 * 3600)
@@ -125,9 +125,9 @@ class TestScheduledRun:
     MORNING = datetime(2026, 9, 30, 6, 0)
 
     def _add_old(self, settings, filename):
-        (settings.images_dir / filename).write_bytes(b"x")
         created_at = int(self.MORNING.timestamp()) - 100 * 3600
-        db.insert_image(settings.db_path, filename, 1, created_at)
+        with db.adding_image(settings.db_path, filename, 1, created_at):
+            (settings.images_dir / filename).write_bytes(b"x")
 
     def test_waits_for_the_cleanup_hour(self, tmp_path):
         settings = make_settings(tmp_path, expiration_hours=1)

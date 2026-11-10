@@ -7,15 +7,16 @@ Everything is set with environment variables; there are no config files.
 | Variable | Default | Description |
 |---|---|---|
 | `APP_PASSWORD` | *(required)* | Password for the single `user` account. |
-| `BASE_URL` | `http://localhost:8000` | Public base URL used to build image links, e.g. `https://images.example.com`. Trailing slash is stripped. |
+| `BASE_URL` | `http://localhost:8000` | The address you open the app at, e.g. `https://images.example.com`. Image links are built from it, and logins, uploads and other form submissions a browser sends from any other address are refused. Trailing slash is stripped. |
 | `SITE_NAME` | `img-to-url` | Name shown in the browser tab title, top bar and footer. |
-| `IMG_MAX_SIZE` | `10` | Maximum upload size in **MB**. |
+| `IMG_MAX_SIZE` | `10` | Maximum upload size in **MB**. Each upload is decoded and re-encoded to remove its metadata, which briefly takes memory: about 170 MB for a 12-megapixel photo, about 500 MB for 48 megapixels. At most two images are re-encoded at a time per worker. |
 | `IMG_EXPIRATION_HOURS` | `0` (disabled) | Images older than this many hours are deleted by the daily 05:00 cleanup job. |
 | `IMG_CACHE_MINUTES` | `0` (no caching) | How long browsers may cache a served image, in whole minutes (e.g. `5` or `30`; sent as `Cache-Control: public, max-age=…`). `0` sends `Cache-Control: no-store`: nothing is cached, so a deleted image disappears on the next load. |
 | `WORKERS` | `1` | uvicorn worker processes. One is enough for this app; each extra worker adds about 40 MB of memory and more startup CPU, so avoid raising it on small VMs. |
 | `PORT` | `8000` | Port uvicorn listens on inside the container. |
 | `DATA_DIR` | `/data` in Docker, `data` otherwise | Directory for the SQLite database and image files. In Docker, leave it alone and mount your storage at `/data` instead. |
 | `SESSION_SECRET` | *(random, generated on first start)* | HMAC key for session cookies. When unset, a random key is created on first start, stored in the database and combined with `APP_PASSWORD`, so changing the password still logs every session out. Only set it if you want sessions to survive a password change. |
+| `FORWARDED_ALLOW_IPS` | *(not set)* | Your reverse proxy's IP address or network, so the logs show each visitor's real address instead of the proxy's; see [Behind a reverse proxy](#behind-a-reverse-proxy). Comma-separated, e.g. `172.17.0.1` or `172.18.0.0/16`. Requests from these addresses may name the visitor in `X-Forwarded-For` (and the scheme in `X-Forwarded-Proto`), so list only your proxy. When unset, those headers are ignored. |
 | `TZ` | `UTC` | Timezone used for the 05:00 cleanup schedule and log timestamps (the admin panel always shows UTC). |
 
 ## Storage
@@ -67,17 +68,36 @@ docker run --rm --user 0 -v /srv/img-to-url:/data img-to-url:latest chown 61001:
   app.
 - The app doesn't rate-limit `/login`, so throttle it at the proxy. See
   [Security](security.md).
+- **Visitor addresses in the logs.** Until you set `FORWARDED_ALLOW_IPS`,
+  the log shows the same address for every request: your proxy's. Set the
+  variable to exactly that address, and the log shows each visitor's own
+  address, taken from the `X-Forwarded-For` header the proxy adds. Typically:
+  - proxy on the host, forwarding to `127.0.0.1:8000`: `172.17.0.1`, the
+    gateway of Docker's default network;
+  - proxy in a container on the same Docker network: that network's subnet,
+    such as `172.18.0.0/16` (see `docker network inspect <network>`), since
+    the proxy container's own address can change.
+
+  The proxy has to send the headers: nginx needs
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and
+  `proxy_set_header X-Forwarded-Proto $scheme;`, while Caddy sends them by
+  default. Trust only the proxy, never `*`, unless the app's port can't be
+  reached any other way; otherwise anyone could write any address into your
+  logs. With the proxy on the same host, publishing the port on localhost
+  only (`-p 127.0.0.1:8000:8000`) also keeps anyone from going around it.
 
 ## Troubleshooting
 
-### Login is accepted but then shows *404 Not Found*
+### Login says "This site's address is set to …"
 
-After a login the app redirects to `/`, which is a 404 for anyone without a
-valid session. If `BASE_URL` is `https://...`, the session cookie is `Secure`,
-and browsers won't send it over plain HTTP. So `https://images.example.com`
-works, but `http://server-ip:8000` will never log in. Always reach the app
-through the URL you configured as `BASE_URL`, or set `BASE_URL` to the
-`http://...` address when testing locally.
+The page was opened at a different address than `BASE_URL`, for example
+`http://server-ip:8000` while `BASE_URL` is `https://images.example.com`. The
+app only accepts logins, uploads and other form submissions from the
+`BASE_URL` address, so that other sites can't forge them. Scheme, host and
+port all have to match: `http://localhost:8000` and `http://127.0.0.1:8000`
+are different addresses. Open the app at `BASE_URL`, or set `BASE_URL` to the
+address you use, such as `http://server-ip:8000` while testing without a
+reverse proxy.
 
 ### Permission errors on `/data`
 

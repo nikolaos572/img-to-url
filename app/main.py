@@ -13,25 +13,25 @@ from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import Headers, UploadFile
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app import auth, db, images
+from app import auth, db, images, sanitize
 from app.cleanup import start_cleanup_thread
-from app.config import Settings
+from app.config import Settings, url_origin
 
 log = logging.getLogger("img-to-url")
 
 APP_DIR = Path(__file__).parent
 
 PAGE_SIZE = 10
-UPLOAD_CHUNK = 1024 * 1024  # 1 MiB
 MAX_FILENAME_ATTEMPTS = 5
 MAX_FORM_BODY = 64 * 1024  # login / admin forms are a few hundred bytes
 MULTIPART_SLACK = 64 * 1024  # boundaries + part headers around an uploaded file
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -74,6 +74,37 @@ class BodySizeLimitMiddleware:
             return message
 
         await self.app(scope, limited_receive, send)
+
+
+class SameOriginMiddleware:
+    """Refuse state-changing requests that a browser sent from another site.
+
+    Browsers put the sending page's origin in an Origin header on every
+    POST. Unless it is exactly BASE_URL's origin, the request was made by
+    another site (a sibling subdomain included, which SameSite=Lax cookies
+    don't stop) or the app was opened at an address other than BASE_URL. It
+    is refused before authentication and before the body is read. Requests
+    without the header don't come from a browser (curl, scripts), so no
+    other site can forge them; they pass and still need a session cookie.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        allowed_origin: str | None,
+        refuse: Callable[[Request, str], Response],
+    ) -> None:
+        self.app = app
+        self.allowed_origin = allowed_origin
+        self.refuse = refuse  # (request, its Origin header) -> response to send
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] not in SAFE_METHODS:
+            origin = Headers(scope=scope).get("origin")
+            if origin is not None and url_origin(origin) != self.allowed_origin:
+                await self.refuse(Request(scope), origin)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -132,9 +163,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return settings.max_size_bytes + MULTIPART_SLACK, too_large
         return MAX_FORM_BODY, "Request body is too large."
 
-    # Added before security_headers so that one stays the outer middleware
-    # and its headers land on these 413 responses too.
+    def refuse_other_origin(request: Request, origin: str) -> Response:
+        log.warning(
+            "Refused %s %s sent from %r: not BASE_URL's origin %s",
+            request.method, request.url.path, origin, settings.origin,
+        )
+        message = (
+            f"This site's address is set to {settings.origin} (BASE_URL), but "
+            f"this request came from {origin}. Open {settings.origin}/login, "
+            "or set BASE_URL to the address you use."
+        )
+        if request.url.path == "/login":
+            return templates.TemplateResponse(
+                request, "login.html", {"error": message}, status_code=403
+            )
+        return JSONResponse({"detail": message}, status_code=403)
+
+    # Both added before security_headers so that one stays the outer
+    # middleware and its headers land on their 413 and 403 responses too.
+    # The origin check runs first: a refused request isn't read at all.
     app.add_middleware(BodySizeLimitMiddleware, limits=body_limit)
+    app.add_middleware(
+        SameOriginMiddleware, allowed_origin=settings.origin, refuse=refuse_other_origin
+    )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -142,7 +193,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Stop browsers from MIME-sniffing served files as something active,
         # and stop other sites from embedding the logged-in pages in a frame.
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        if response.headers.get("content-type", "").startswith("text/html"):
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("image/"):
+            # Uploaded files. Whatever a crafted one contains, a browser
+            # opening its link directly may neither run nor load anything
+            # (sandbox also gives it a unique origin, so it can't reach this
+            # site's cookies or pages). Embedding it elsewhere is unaffected.
+            # Inline styles are allowed only because Chromium's own image
+            # viewer uses them to center the picture; they can't load anything.
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            )
+        elif content_type.startswith("text/html"):
             response.headers.setdefault("X-Frame-Options", "DENY")
             # Scripts and styles only from this site's own files — no inline
             # scripts or event handlers anywhere. data: is for the favicon and
@@ -195,9 +258,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     @app.post("/logout", include_in_schema=False)
-    def logout():
+    def logout(request: Request):
         response = RedirectResponse("/login", status_code=303)
-        auth.clear_session_cookie(response)
+        auth.end_session(request, response, settings)
         return response
 
     # ----------------------------------------------------------------- upload
@@ -225,21 +288,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     detail=f"Only image files are allowed ({allowed}).",
                 )
 
-            max_bytes = settings.max_size_bytes
-            chunks: list[bytes] = []
-            total = 0
-            while chunk := await file.read(UPLOAD_CHUNK):
-                total += len(chunk)
-                if total > max_bytes:
-                    raise HTTPException(status_code=413, detail=too_large)
-                chunks.append(chunk)
-            data = b"".join(chunks)
+            # The whole file has been received (and spooled to disk) by now.
+            # Reading one byte past the limit tells an oversized one apart,
+            # and the upload is held in memory once, not as chunks plus a copy.
+            data = await file.read(settings.max_size_bytes + 1)
+            if len(data) > settings.max_size_bytes:
+                raise HTTPException(status_code=413, detail=too_large)
 
         if not images.looks_like_image(data):
             raise HTTPException(
                 status_code=400,
                 detail="File content is not a recognized image format.",
             )
+        # Only the picture is stored: GPS position, device details and every
+        # other kind of metadata are dropped by re-encoding (app/sanitize.py).
+        try:
+            data, ext = await sanitize.strip_metadata_async(data, ext)
+        except sanitize.InvalidImage as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
         for _ in range(MAX_FILENAME_ATTEMPTS):
             filename = images.random_filename(ext)
@@ -248,7 +314,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return {
                     "url": images.image_url(settings.base_url, filename),
                     "filename": filename,
-                    "size": total,
+                    "size": len(data),
                 }
             except sqlite3.IntegrityError:
                 # Astronomically unlikely, but regenerate on a collision.
@@ -306,9 +372,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_clear_all(request: Request):
         if not auth.is_authenticated(request, settings):
             return RedirectResponse("/login", status_code=303)
-        for row in db.list_images(settings.db_path, limit=10**9, offset=0):
-            (settings.images_dir / row["filename"]).unlink(missing_ok=True)
-        db.delete_all_images(settings.db_path)
+        db.delete_all_images(
+            settings.db_path,
+            lambda filename: images.delete_file(settings.images_dir, filename),
+        )
         return RedirectResponse("/admin", status_code=303)
 
     # ----------------------------------------------------------------- misc
@@ -347,35 +414,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     log.info(
         "img-to-url ready (base_url=%s, max_size=%sMB, expiration=%sh, "
-        "image_cache=%r, workers_env=%s)",
+        "image_cache=%r, workers_env=%s, trusted_proxies=%s)",
         settings.base_url,
         settings.max_size_mb,
         settings.expiration_hours,
         settings.image_cache_control,
         settings.workers,
+        settings.forwarded_allow_ips or "none",
     )
     return app
 
 
 def _save_image(settings: Settings, filename: str, data: bytes) -> None:
-    """Record then write the image (runs in a worker thread).
+    """Record and write a new image (runs in a worker thread).
 
-    The DB row is inserted first: the unique constraint on filename claims
-    the name, so the astronomically-unlikely case of two workers picking
-    the same random filename fails here, *before* any file is touched —
-    the old order could have overwritten and then deleted the other
-    upload's file. If the write itself fails, the row and any partially
-    written file are removed, so no dead link or orphan file is left behind.
+    The row is inserted first: the unique constraint on filename claims the
+    name, so the astronomically unlikely case of two workers picking the
+    same random filename fails here, before any file is touched. The file
+    is then written while that insert still holds the database's write
+    lock, which Clear all takes too, so Clear all sees a new image with
+    both its row and its file or with neither. If the write fails, the row
+    is rolled back and any partial file removed: a partial file would still
+    be publicly served, yet invisible to the admin panel and to Clear all.
     """
-    db.insert_image(settings.db_path, filename, len(data), int(time.time()))
-    try:
-        (settings.images_dir / filename).write_bytes(data)
-    except Exception:
-        # A partial file (e.g. disk full) would still be publicly served,
-        # yet invisible to the admin panel and to Clear all.
-        (settings.images_dir / filename).unlink(missing_ok=True)
-        db.delete_image(settings.db_path, filename)
-        raise
+    path = settings.images_dir / filename
+    with db.adding_image(settings.db_path, filename, len(data), int(time.time())):
+        try:
+            path.write_bytes(data)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
 
 
 def _remove_image(settings: Settings, filename: str) -> bool:

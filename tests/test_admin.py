@@ -1,8 +1,14 @@
 """Tests for the admin page: listing, pagination, stats, delete, clear-all."""
 
-from app import db
+import threading
+import time
+from pathlib import Path
 
-from .conftest import make_png, upload
+from app import db, images, main
+
+from .conftest import make_png, stored_bytes, upload
+
+LATE_FILENAME = "image-0123456789abcdef-0123456789abcdef.png"
 
 
 def _upload_many(auth_client, count):
@@ -43,7 +49,7 @@ class TestAdminListing:
         response = auth_client.get("/admin")
         assert response.status_code == 200
         assert data["url"] in response.text
-        assert "2.0 KB" in response.text
+        assert f">{images.human_size(data['size'])}<" in response.text  # stored size
         assert "1" in response.text  # image count
         assert data["filename"] in response.text
 
@@ -88,11 +94,13 @@ class TestAdminListing:
         assert "onclick" not in html  # wired up by admin.js, as the CSP requires
 
     def test_total_space_and_count(self, auth_client):
-        upload(auth_client, "a.png", make_png(1024))  # magic + 1024 bytes
-        upload(auth_client, "b.png", make_png(2048))
+        first = upload(auth_client, "a.png", make_png(1024)).json()["filename"]
+        second = upload(auth_client, "b.png", make_png(2048)).json()["filename"]
+        stored = len(stored_bytes(auth_client, first)) + len(stored_bytes(auth_client, second))
         response = auth_client.get("/admin")
         assert response.text.count('class="img-row"') == 2
-        assert "3.0 KB" in response.text
+        # The space the stored files take, not what was uploaded.
+        assert f">{images.human_size(stored)}<" in response.text
 
 
 class TestAdminDelete:
@@ -164,3 +172,83 @@ class TestAdminClearAll:
     def test_clear_all_when_empty_is_harmless(self, auth_client):
         response = auth_client.post("/admin/clear-all", follow_redirects=False)
         assert response.status_code == 303
+
+    # Clear all racing an upload. A file left without its row would stay
+    # public while being invisible in the admin panel and never expiring,
+    # so each test checks that files on disk and rows match exactly.
+
+    def test_upload_finishing_during_clear_all_leaves_no_orphan(
+        self, auth_client, monkeypatch
+    ):
+        settings = auth_client.app.state.settings
+        for i in range(3):
+            upload(auth_client, f"{i}.png", make_png(10))
+
+        late = threading.Thread(
+            target=main._save_image, args=(settings, LATE_FILENAME, make_png(20))
+        )
+        real_unlink = Path.unlink
+
+        def unlink_while_an_upload_arrives(path, *args, **kwargs):
+            if late.ident is None:  # first file only: start the upload now
+                late.start()
+                late.join(timeout=0.5)  # let it finish unless Clear all blocks it
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink_while_an_upload_arrives)
+        response = auth_client.post("/admin/clear-all", follow_redirects=False)
+        assert response.status_code == 303
+        late.join(timeout=10)
+        assert not late.is_alive()
+        _assert_files_match_rows(settings)
+
+    def test_clear_all_during_an_upload_leaves_no_orphan(
+        self, auth_client, monkeypatch
+    ):
+        settings = auth_client.app.state.settings
+        upload(auth_client, "a.png", make_png(10))
+
+        writing = threading.Event()
+        real_write_bytes = Path.write_bytes
+
+        def slow_write_bytes(path, data):
+            writing.set()
+            time.sleep(0.5)  # Clear all is requested while the file is written
+            return real_write_bytes(path, data)
+
+        monkeypatch.setattr(Path, "write_bytes", slow_write_bytes)
+        late = threading.Thread(
+            target=main._save_image, args=(settings, LATE_FILENAME, make_png(20))
+        )
+        late.start()
+        assert writing.wait(timeout=5)
+        response = auth_client.post("/admin/clear-all", follow_redirects=False)
+        assert response.status_code == 303
+        late.join(timeout=10)
+        assert not late.is_alive()
+        _assert_files_match_rows(settings)
+
+    def test_file_that_cannot_be_deleted_keeps_its_row(self, auth_client, monkeypatch):
+        settings = auth_client.app.state.settings
+        stuck = upload(auth_client, "stuck.png", make_png(10)).json()["filename"]
+        upload(auth_client, "other.png", make_png(11))
+        real_unlink = Path.unlink
+
+        def unlink(path, *args, **kwargs):
+            if path.name == stuck:
+                raise PermissionError(13, "Permission denied")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        response = auth_client.post("/admin/clear-all", follow_redirects=False)
+        assert response.status_code == 303
+        # Still listed (so it can be retried), and everything else is gone.
+        rows = db.list_images(settings.db_path, limit=10, offset=0)
+        assert [row["filename"] for row in rows] == [stuck]
+        _assert_files_match_rows(settings)
+
+
+def _assert_files_match_rows(settings):
+    rows = {row["filename"] for row in db.list_images(settings.db_path, limit=10**9, offset=0)}
+    files = {path.name for path in settings.images_dir.iterdir()}
+    assert files == rows, f"orphan files: {files - rows}, dead rows: {rows - files}"
